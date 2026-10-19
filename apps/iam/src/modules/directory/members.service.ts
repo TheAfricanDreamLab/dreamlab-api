@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Membership, Permission } from '@dreamlab/contracts';
 import type { AssignRoleSchema, MemberListQuerySchema, UpdateMembershipSchema } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
-import { badRequest, conflict, forbidden, newId, notFound } from '@lib/common';
+import { badRequest, conflict, forbidden, likeContains, newId, notFound } from '@lib/common';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
@@ -46,7 +46,7 @@ export class MembersService {
             query.status ? eq(memberships.status, query.status) : ne(memberships.status, 'left'),
             query.orgUnitId ? eq(memberships.orgUnitId, query.orgUnitId) : undefined,
             query.cursor ? gt(memberships.id, query.cursor) : undefined,
-            query.q ? or(ilike(users.fullName, `%${query.q}%`), ilike(users.email, `%${query.q}%`), ilike(users.phone, `%${query.q}%`)) : undefined,
+            query.q ? or(ilike(users.fullName, likeContains(query.q)), ilike(users.email, likeContains(query.q)), ilike(users.phone, likeContains(query.q))) : undefined,
             reach === 'all' ? undefined : this.withinUnits(reach),
           ),
         )

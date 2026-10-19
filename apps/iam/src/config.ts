@@ -58,6 +58,15 @@ export const iamConfigSchema = baseConfigSchema.extend({
 
 export type IamConfig = z.infer<typeof iamConfigSchema>;
 
+/** Settings that are fine in development but dangerous in production. */
+export const iamProductionSchema = iamConfigSchema.superRefine((c, ctx) => {
+  if (c.NODE_ENV !== 'production') return;
+  if (c.TRUST_PROXY === 'true') ctx.addIssue({ code: 'custom', path: ['TRUST_PROXY'], message: 'must name the gateway network, not true, in production' });
+  if (c.BOOTSTRAP_ADMIN_PASSWORD && c.BOOTSTRAP_ADMIN_PASSWORD.length < 16) ctx.addIssue({ code: 'custom', path: ['BOOTSTRAP_ADMIN_PASSWORD'], message: 'at least 16 characters in production' });
+  if (c.SEED_DEMO_ORGS) ctx.addIssue({ code: 'custom', path: ['SEED_DEMO_ORGS'], message: 'demo organisations are for development only' });
+  if (!c.AUTH_ISSUER.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['AUTH_ISSUER'], message: 'must be an https URL in production' });
+});
+
 export function emailProvider(config: Pick<IamConfig, 'EMAIL_PROVIDER' | 'RESEND_API_KEY' | 'ZEPTOMAIL_TOKEN'>): 'resend' | 'zeptomail' | 'console' {
   if (config.EMAIL_PROVIDER) return config.EMAIL_PROVIDER;
   if (config.RESEND_API_KEY) return 'resend';

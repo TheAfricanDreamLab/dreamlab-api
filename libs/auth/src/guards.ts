@@ -1,16 +1,30 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { ScopeType } from '@dreamlab/contracts';
 import { forbidden, REDIS, unauthorized } from '@lib/common';
 import type Redis from 'ioredis';
 import { AUTHZ_CHECKER, AuthzChecker } from './authz';
 import { AuthenticatedRequest, IS_PUBLIC, PermissionRequirement, REQUIRED_PERMISSION } from './decorators';
 import { bearerToken, JwtVerifier, TokenInvalidError } from './jwt-verifier';
-import { hasOrgPermission, principalFromClaims } from './principal';
+import { hasOrgPermission, Principal, principalFromClaims } from './principal';
 
 export const JWT_VERIFIER = Symbol('JWT_VERIFIER');
 
 /** Redis key marking a session as revoked, so its unexpired access tokens stop working at once. */
 export const revokedSessionKey = (sessionId: string): string => `auth:revoked-sid:${sessionId}`;
+
+/** Redis key holding a user's current authorization version (IAM sets it whenever their roles change). */
+export const authzVersionKey = (userId: string): string => `auth:azv:${userId}`;
+
+/** Placeholder org id for platform-level checks that have no organisation. */
+export const NO_ORG = '00000000-0000-0000-0000-000000000000';
+
+/** Revoked session: throws. Roles changed since the token was issued: marks the principal stale. */
+export async function checkTokenFreshness(redis: Redis, principal: Principal): Promise<Principal> {
+  const [revoked, version] = await redis.mget(revokedSessionKey(principal.sessionId), authzVersionKey(principal.userId));
+  if (revoked) throw new TokenInvalidError('Session has ended', 'invalid');
+  return version !== null && Number(version) > principal.authzVersion ? { ...principal, stale: true } : principal;
+}
 
 /**
  * Global authentication guard. Every route needs a valid bearer token unless marked @Public;
@@ -35,10 +49,8 @@ export class AuthenticationGuard implements CanActivate {
       throw unauthorized('token_missing', 'Authentication required');
     }
     try {
-      const principal = principalFromClaims(await this.verifier.verify(token));
-      if (this.redis && (await this.redis.exists(revokedSessionKey(principal.sessionId)))) {
-        throw new TokenInvalidError('Session has ended', 'invalid');
-      }
+      let principal = principalFromClaims(await this.verifier.verify(token));
+      if (this.redis) principal = await checkTokenFreshness(this.redis, principal);
       req.principal = principal;
       return true;
     } catch (err) {
@@ -51,7 +63,17 @@ export class AuthenticationGuard implements CanActivate {
   }
 }
 
-/** Global authorization guard for routes decorated with @RequirePermission. */
+interface ScopeQuery {
+  scopeType?: ScopeType;
+  scopeId?: string;
+  anyScope?: boolean;
+}
+
+/**
+ * Global authorization guard for routes decorated with @RequirePermission.
+ * Fresh tokens are decided from their role claims. Stale tokens (roles changed since issue) and
+ * narrower scopes are decided by IAM through the AuthzChecker.
+ */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(
@@ -70,10 +92,18 @@ export class PermissionsGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const principal = req.principal;
     if (!principal) throw unauthorized('token_missing', 'Authentication required');
-    if (principal.platformAdmin) return true;
+    if (principal.platformAdmin && !principal.stale) return true;
 
     const params = req.params ?? {};
     const routeOrgId = params[requirement.orgParam ?? 'orgId'];
+    const ask = (orgId: string, scope: ScopeQuery = {}): Promise<boolean> =>
+      this.checker
+        ? this.checker.check({ userId: principal.userId, orgId, permission: requirement.permission, authzVersion: principal.authzVersion, ...scope })
+        : Promise.resolve(false);
+
+    // A stale platform-admin claim is re-checked; platform admins act in any organisation.
+    if (principal.platformAdmin && principal.stale && (await ask(routeOrgId ?? principal.orgId ?? NO_ORG))) return true;
+
     if (routeOrgId && routeOrgId !== principal.orgId) {
       throw forbidden(
         'org_context_mismatch',
@@ -84,19 +114,12 @@ export class PermissionsGuard implements CanActivate {
     if (!orgId) throw forbidden('org_context_required', 'This action needs an organisation context');
 
     if (hasOrgPermission(principal, requirement.permission)) return true;
-
-    if (this.checker && (requirement.scope || requirement.anyScope)) {
-      const scopeId = requirement.scope ? params[requirement.scope.param] : undefined;
-      const allowed = await this.checker.check({
-        userId: principal.userId,
-        orgId,
-        permission: requirement.permission,
-        scopeType: requirement.scope?.type,
-        scopeId,
-        anyScope: requirement.anyScope && !requirement.scope,
-        authzVersion: principal.authzVersion,
-      });
-      if (allowed) return true;
+    if (principal.stale && (await ask(orgId))) return true;
+    if (requirement.scope) {
+      const scopeId = params[requirement.scope.param];
+      if (scopeId && (await ask(orgId, { scopeType: requirement.scope.type, scopeId }))) return true;
+    } else if (requirement.anyScope && (await ask(orgId, { anyScope: true }))) {
+      return true;
     }
     throw forbidden('permission_denied', `Missing permission: ${requirement.permission}`);
   }

@@ -29,10 +29,11 @@ export class MeDto extends createZodDto(c.MeSchema) {}
 export class OrganizationDto extends createZodDto(c.OrganizationSchema) {}
 export class PublicOrganizationDto extends createZodDto(c.PublicOrganizationSchema) {}
 export class CreateOrganizationDto extends createZodDto(c.CreateOrganizationSchema) {}
+export class SignUpOrganizationDto extends createZodDto(c.SignUpOrganizationSchema) {}
 export class UpdateOrganizationDto extends createZodDto(c.UpdateOrganizationSchema) {}
 export class OrganizationPageDto extends createZodDto(c.pageOf(c.OrganizationSchema)) {}
 export class OrgListQueryDto extends createZodDto(
-  c.PageQuerySchema.extend({ q: z.string().max(120).optional(), kind: c.OrgKindSchema.optional() }),
+  c.PageQuerySchema.extend({ q: z.string().max(120).optional(), kind: c.OrgKindSchema.optional(), status: c.OrgStatusSchema.optional() }),
 ) {}
 export class MembershipDto extends createZodDto(c.MembershipSchema) {}
 export class MembershipPageDto extends createZodDto(c.pageOf(c.MembershipSchema)) {}

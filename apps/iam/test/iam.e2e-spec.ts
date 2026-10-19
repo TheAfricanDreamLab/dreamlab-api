@@ -8,14 +8,18 @@ import { buildOpenApiDocument, newId } from '@lib/common';
 import { loadConfig } from '@lib/config';
 import { DATABASE, runMigrations } from '@lib/database';
 import { EventEnvelope, processOnce, RabbitConnection } from '@lib/messaging';
-import { eventually, request, testEnv } from '@lib/testing';
+import { E2E_GATEWAY_TOKEN, eventually, request, testEnv } from '@lib/testing';
 import { and, count, eq, sql } from 'drizzle-orm';
 import { Logger } from 'nestjs-pino';
 import { IamAppModule } from '../src/app.module';
 import { iamConfigSchema } from '../src/config';
 import { IamDatabase, iamMigrationsFolder, schema } from '../src/database';
 import { NOTIFIER, Notifier, OtpMessage } from '../src/modules/notifications/notifier';
+import { installGatewayTrust } from '../src/gateway-trust';
 import { SeedService } from '../src/modules/seed/seed.service';
+
+/** Headers the gateway adds after resolving a tenant subdomain. */
+const viaGateway = (orgId: string) => ({ 'x-tenant-org-id': orgId, 'x-gateway-token': E2E_GATEWAY_TOKEN });
 
 /** Captures outbound messages instead of sending them. */
 class CapturingNotifier implements Notifier {
@@ -48,7 +52,7 @@ async function signUp(email: string, tenantOrgId?: string) {
   await request(app, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName: 'Test User', consent } });
   const res = await request(app, 'POST', '/v1/auth/verify', {
     body: { identifier: email, code: notifier.lastCode(email) },
-    headers: tenantOrgId ? { 'x-tenant-org-id': tenantOrgId } : {},
+    headers: tenantOrgId ? viaGateway(tenantOrgId) : {},
   });
   expect(res.status).toBe(200);
   return res.body as { accessToken: string; refreshToken: string; context: { orgId: string | null } };
@@ -80,6 +84,7 @@ beforeAll(async () => {
     .compile();
   app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ trustProxy: true }), { bufferLogs: true });
   app.useLogger(app.get(Logger));
+  installGatewayTrust(app.getHttpAdapter().getInstance(), config.INTERNAL_GATEWAY_TOKEN);
   app.connectMicroservice<MicroserviceOptions>(
     { transport: Transport.RMQ, options: { urls: [config.RABBITMQ_URL], queue: IAM_RPC_QUEUE, queueOptions: { durable: true } } },
     { inheritAppConfig: true },
@@ -159,9 +164,18 @@ describe('authentication', () => {
     await grant('member@example.com', dreamlab, 'student');
     const login = await request(app, 'POST', '/v1/auth/login', {
       body: { identifier: 'member@example.com', password: 'correct horse battery' },
-      headers: { 'x-tenant-org-id': dreamlab },
+      headers: viaGateway(dreamlab),
     });
     expect(login.body).toMatchObject({ context: { orgId: dreamlab } });
+  });
+
+  it('ignores tenant headers that did not come through the gateway', async () => {
+    const dreamlab = await orgId('dreamlab');
+    const login = await request(app, 'POST', '/v1/auth/login', {
+      body: { identifier: 'member@example.com', password: 'correct horse battery' },
+      headers: { 'x-tenant-org-id': dreamlab },
+    });
+    expect(login.body).toMatchObject({ context: { orgId: null } });
   });
 
   it('refuses Google sign-in when no client ids are configured', async () => {
@@ -200,7 +214,7 @@ describe('tenant isolation', () => {
     await grant('admin-a@example.com', dreamlab, 'org_admin');
     const login = await request(app, 'POST', '/v1/auth/login', {
       body: { identifier: 'admin-a@example.com', password: 'correct horse battery' },
-      headers: { 'x-tenant-org-id': dreamlab },
+      headers: viaGateway(dreamlab),
     });
     const token = (login.body as { accessToken: string }).accessToken;
     expect((await request(app, 'GET', `/v1/orgs/${dreamlab}/members`, { token })).status).toBe(200);
@@ -271,7 +285,7 @@ describe('directory', () => {
     const corp = (created.body as { id: string }).id;
     const owner = await request(app, 'POST', '/v1/auth/login', {
       body: { identifier: 'owner@example.com', password: 'correct horse battery' },
-      headers: { 'x-tenant-org-id': corp },
+      headers: viaGateway(corp),
     });
     const ownerToken = (owner.body as { accessToken: string }).accessToken;
 
@@ -320,5 +334,71 @@ describe('directory', () => {
       .from(schema.outbox)
       .where(and(eq(schema.outbox.orgId, corp), eq(schema.outbox.type, 'role.granted')))) as [{ n: number }];
     expect(n).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('organisation sign-up', () => {
+  const signUpOrg = (token: string, body: object) => request(app, 'POST', '/v1/orgs/signup', { token, body });
+  const switchTo = async (token: string, orgId: string) =>
+    ((await request(app, 'POST', '/v1/auth/switch-org', { token, body: { orgId } })).body as { accessToken: string }).accessToken;
+
+  it('an enterprise signs up and is live at once, with the founder as org admin', async () => {
+    const founder = await signUp('founder@acme-two.com');
+    const res = await signUpOrg(founder.accessToken, { slug: 'acme-two', name: 'Acme Two', kind: 'enterprise', profile: { sizeBand: '51-200' } });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'active', kinds: ['enterprise'] });
+    const org = (res.body as { id: string }).id;
+    expect((await request(app, 'GET', '/v1/orgs/resolve/acme-two')).status).toBe(200);
+    const token = await switchTo(founder.accessToken, org);
+    expect((await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token, body: { email: 'staff@acme-two.com' } })).status).toBe(201);
+  });
+
+  it('an institution waits for approval: set-up allowed, not live', async () => {
+    const dean = await signUp('dean@uni.example');
+    const res = await signUpOrg(dean.accessToken, { slug: 'lagos-uni', name: 'Lagos University', kind: 'institution' });
+    expect(res.body).toMatchObject({ status: 'pending' });
+    const org = (res.body as { id: string }).id;
+    expect((await request(app, 'GET', '/v1/orgs/resolve/lagos-uni')).status).toBe(404);
+
+    const token = await switchTo(dean.accessToken, org);
+    expect((await request(app, 'POST', `/v1/orgs/${org}/units`, { token, body: { name: 'Faculty of Science' } })).status).toBe(201);
+    expect((await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token, body: { email: 'student@uni.example' } })).body).toMatchObject({
+      code: 'org_pending',
+    });
+    expect(
+      (await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token, body: { email: 'registrar@uni.example', roleKeys: ['org_admin'] } })).status,
+    ).toBe(201);
+    expect((await request(app, 'PATCH', `/v1/orgs/${org}`, { token, body: { status: 'active' } })).status).toBe(403);
+
+    const admin = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } });
+    const adminToken = (admin.body as { accessToken: string }).accessToken;
+    const pending = await request(app, 'GET', '/v1/orgs?status=pending', { token: adminToken });
+    expect((pending.body as { items: { id: string }[] }).items.map((o) => o.id)).toContain(org);
+    expect((await request(app, 'PATCH', `/v1/orgs/${org}`, { token: adminToken, body: { status: 'active' } })).body).toMatchObject({ status: 'active' });
+    expect((await request(app, 'GET', '/v1/orgs/resolve/lagos-uni')).status).toBe(200);
+    expect((await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token, body: { email: 'student@uni.example' } })).status).toBe(201);
+  });
+
+  it('rejects reserved and taken names', async () => {
+    const user = await signUp('reserved@example.com');
+    expect((await signUpOrg(user.accessToken, { slug: 'api', name: 'API', kind: 'enterprise' })).status).toBe(400);
+    expect((await signUpOrg(user.accessToken, { slug: 'acme-two', name: 'Dup', kind: 'enterprise' })).body).toMatchObject({ code: 'slug_taken' });
+  });
+
+  it('a removed admin loses access at once, before their token expires', async () => {
+    const owner = await signUp('owner2@corp.example');
+    const org = ((await signUpOrg(owner.accessToken, { slug: 'corp-two', name: 'Corp Two', kind: 'enterprise' })).body as { id: string }).id;
+    const ownerToken = await switchTo(owner.accessToken, org);
+    const second = await signUp('second@corp.example');
+    await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token: ownerToken, body: { email: 'second@corp.example', roleKeys: ['org_admin'] } });
+    const joined = await request(app, 'POST', '/v1/invitations/accept', { token: second.accessToken, body: { token: notifier.lastInviteToken('second@corp.example') } });
+    const roles = (joined.body as { roles: { id: string; roleKey: string }[] }).roles;
+    const secondToken = await switchTo(second.accessToken, org);
+    expect((await request(app, 'GET', `/v1/orgs/${org}/members`, { token: secondToken })).status).toBe(200);
+
+    const assignment = roles.find((r) => r.roleKey === 'org_admin')!;
+    expect((await request(app, 'DELETE', `/v1/orgs/${org}/role-assignments/${assignment.id}`, { token: ownerToken })).status).toBe(204);
+    // Same unexpired token: its org_admin claim is stale now, so IAM is asked and says no.
+    expect((await request(app, 'GET', `/v1/orgs/${org}/members`, { token: secondToken })).status).toBe(403);
   });
 });

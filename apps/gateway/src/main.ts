@@ -1,17 +1,20 @@
 import 'reflect-metadata';
 import { SwaggerModule } from '@nestjs/swagger';
 import { buildOpenApiDocument, createHttpApp } from '@lib/common';
-import { loadConfig, loadDotEnv } from '@lib/config';
+import { loadConfig, loadDotEnv, swaggerEnabled, trustProxySetting } from '@lib/config';
 import { CONTRACTS_VERSION } from '@dreamlab/contracts';
 import { GatewayAppModule } from './app.module';
-import { gatewayConfigSchema } from './config';
+import { gatewayProductionSchema } from './config';
 import { originMatcher } from './cors';
 import { DocsService } from './docs/docs.service';
 
 async function bootstrap(): Promise<void> {
   loadDotEnv();
-  const config = loadConfig(gatewayConfigSchema);
-  const app = await createHttpApp(GatewayAppModule.forRoot(config));
+  const config = loadConfig(gatewayProductionSchema);
+  const app = await createHttpApp(GatewayAppModule.forRoot(config), {
+    trustProxy: trustProxySetting(config.TRUST_PROXY),
+    hsts: config.NODE_ENV === 'production',
+  });
 
   const allowed = originMatcher(config.CORS_ORIGINS);
   app.enableCors({
@@ -22,7 +25,7 @@ async function bootstrap(): Promise<void> {
     maxAge: 600,
   });
 
-  if (config.SWAGGER_ENABLED) {
+  if (swaggerEnabled(config)) {
     const own = buildOpenApiDocument(app, {
       title: 'Dream Lab OS API',
       description:

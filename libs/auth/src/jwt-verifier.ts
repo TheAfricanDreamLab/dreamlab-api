@@ -34,6 +34,7 @@ export class JwtVerifier {
         issuer: this.options.issuer,
         audience: this.options.audience,
         algorithms: ['EdDSA'],
+        typ: 'at+jwt',
         clockTolerance: 5,
       });
       const parsed = AccessTokenClaimsSchema.safeParse(payload);

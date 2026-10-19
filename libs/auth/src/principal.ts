@@ -18,6 +18,11 @@ export interface Principal {
   authzVersion: number;
   tokenId: string;
   expiresAt: number;
+  /**
+   * The user's roles changed after this token was issued. Its role claims can no longer be
+   * trusted, so permissions are re-checked with IAM instead of read from the token.
+   */
+  stale?: boolean;
 }
 
 export function principalFromClaims(claims: AccessTokenClaims): Principal {
@@ -42,5 +47,6 @@ export function orgPermissions(principal: Pick<Principal, 'roles' | 'platformAdm
 }
 
 export function hasOrgPermission(principal: Principal, permission: Permission): boolean {
+  if (principal.stale) return false;
   return orgPermissions(principal).has(permission);
 }

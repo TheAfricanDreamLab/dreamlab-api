@@ -55,7 +55,7 @@ export class MeController {
         memberships: rows.map((r) => ({
           membershipId: r.m.id,
           status: r.m.status,
-          org: toPublicOrganization(r.o),
+          org: { ...toPublicOrganization(r.o), status: r.o.status },
           roles: (assignments.get(r.m.id) ?? []).map(toAssignment),
         })),
       };

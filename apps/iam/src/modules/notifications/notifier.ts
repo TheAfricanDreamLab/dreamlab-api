@@ -41,7 +41,10 @@ const PURPOSE_TEXT: Record<OtpPurpose, { subject: string; line: string }> = {
 export class ChannelNotifier implements Notifier {
   private readonly logger = new Logger('Notifier');
 
-  constructor(@Inject(EMAIL_SENDER) private readonly email: EmailSender) {}
+  constructor(
+    @Inject(EMAIL_SENDER) private readonly email: EmailSender,
+    @Inject(CONFIG) private readonly config: IamConfig,
+  ) {}
 
   async sendOtp(m: OtpMessage): Promise<void> {
     const minutes = Math.round(m.expiresInSeconds / 60);
@@ -78,6 +81,10 @@ export class ChannelNotifier implements Notifier {
 
   /** SMS goes through notify-hub (Termii) in a later slice; until then it is only logged. */
   private async sms(destination: string, text: string): Promise<void> {
+    if (this.config.NODE_ENV === 'production') {
+      // Never put codes in production logs; SMS arrives with notify-hub (Termii).
+      throw new AppException(HttpStatus.SERVICE_UNAVAILABLE, 'sms_unavailable', 'Phone verification is not available yet. Use your email address.');
+    }
     this.logger.warn(`[dev only, SMS not sent] to=${destination}: ${text}`);
   }
 }

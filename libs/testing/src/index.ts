@@ -23,6 +23,8 @@ export async function request<T = any>(
   return { status: res.statusCode, body: (res.body ? res.json() : null) as T, headers: res.headers };
 }
 
+export const E2E_GATEWAY_TOKEN = 'e2e-gateway-token-0123456789abcdef0123';
+
 /** Environment every e2e test needs on top of the container URLs from global setup. */
 export function testEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
@@ -31,6 +33,7 @@ export function testEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     LOG_LEVEL: 'warn',
     AUTH_ISSUER: 'http://iam.test',
     IAM_KEY_ENCRYPTION_SECRET: randomBytes(32).toString('base64'),
+    INTERNAL_GATEWAY_TOKEN: E2E_GATEWAY_TOKEN,
     BOOTSTRAP_ADMIN_EMAIL: 'admin@theafricandreamlab.com',
     BOOTSTRAP_ADMIN_PASSWORD: 'e2e-admin-password',
     SEED_DEMO_ORGS: 'true',

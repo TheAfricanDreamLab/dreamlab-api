@@ -19,6 +19,8 @@ Inputs: Starter ERD v0.1 (`dreamlab-api/docs/erd/`), planning decisions of 19 Oc
 | D7 | **Email through Resend or ZeptoMail**, chosen by which credentials are configured. SMS waits for notify-hub (Termii). | — |
 | D8 | **Domain: theafricandreamlab.com.** Tenants at `<slug>.theafricandreamlab.com`, API at `api.theafricandreamlab.com`; the gateway takes the tenant from the Host or the browser Origin. | Plan §6.2 placeholder domain |
 | D9 | **Contracts are consumed as git tags** (`github:TheAfricanDreamLab/dreamlab-contracts#vX.Y.Z`) until an npm token exists. | v1.0 §2.1 (npm publish) |
+| D11 | **Self-service organisation sign-up.** Any verified user can create an organisation and becomes its admin. Enterprises go live at once; institutions, partners and sponsors stay `pending` (set-up only) until a platform admin approves them. | Platform-admin-only creation |
+| D12 | **Attribution.** Commits carry a `Co-Authored-By: Claude` trailer and PRs credit Claude Code (owner instruction, 19 Oct 2026). | v1.0 "Authorship" section |
 | D10 | **Pinned majors:** Nest 11, Zod 3.25, TypeScript 5.9. Nest 12 is ESM-only and the Zod/OpenAPI bridge (`nestjs-zod`) and `ts-rest` do not yet support Nest 12 / Zod 4; upgrading is a hardening slice. | — |
 
 ## 2. Services
@@ -41,6 +43,7 @@ All in milestone **P0 - Foundations**. Issue numbers are in each repo.
 |---|---|---|---|
 | CT-1 + CT-2 — contracts bootstrap, auth + directory contracts | contracts | #1 | Done — `v0.1.0` |
 | — Google sign-in route | contracts | PR #3 | Done — `v0.2.0` |
+| — Organisation self sign-up, `pending` status | contracts | PR #4 | Done — `v0.3.0` |
 | API-1 — Nest monorepo (gateway + iam) | api | #3 | Built, in PR |
 | API-2 — shared libs: config, logging, database, health | api | #4 | Built, in PR |
 | API-3 — local stack + Testcontainers harness | api | #5 | Built, in PR |
@@ -57,34 +60,35 @@ All in milestone **P0 - Foundations**. Issue numbers are in each repo.
 | IAM-10 — directory APIs | api | #16 | Built, in PR |
 | **IAM-11 — Google sign-up / sign-in** [NEW] | api | #18 | Built, in PR |
 | **IAM-12 — email through Resend / ZeptoMail** [NEW] | api | #19 | Built, in PR |
+| **IAM-13 — self-service organisation sign-up with approval** [NEW] | api | #20 | Built, in PR |
 | GW-1 — gateway | api | #17 | Built, in PR |
+| **SEC-1 — security hardening pass on P0** [NEW] | api | #21 | Built, in PR |
 | INF-1 (revised) — deploy gateway + iam stack | infra | #1 | Next |
 | INF-2 (revised) — backups + restore drill per database | infra | #2 | Next |
 | API-5 — curriculum seed as program data (ERD §6) | api | to open | Moves to the catalog service (P2) |
 | API-6 — R2 presigned upload / download | api | to open | Moves to the media service |
-| **SEC-1 — security hardening pass on P0** [NEW] | api | to open | Next, before deploy |
 
 Removed from v1.0 P0: API-2 as `institutions` / `institution_members` (replaced by IAM-1/2/3).
 
 ## 4. Later IAM slices (enterprise phase, after Cohort 04 starts)
 
-Renumbered from the 19 Oct plan to make room for IAM-11/12:
+Renumbered from the 19 Oct plan to make room for IAM-11/12/13:
 
 | Slice | Scope |
 |---|---|
-| IAM-13 | Domain verification and auto-join (`org_domains.join_policy`) |
-| IAM-14 | OIDC SSO per organisation |
-| IAM-15 | SAML SSO per organisation |
-| IAM-16 | SCIM 2.0 provisioning (users, units, groups) |
-| IAM-17 | Enterprise custom roles |
-| IAM-18 | Authenticator-app MFA for admins |
-| IAM-19 | SMS / WhatsApp OTP through notify-hub (Termii) |
+| IAM-14 | Domain verification and auto-join (`org_domains.join_policy`) |
+| IAM-15 | OIDC SSO per organisation |
+| IAM-16 | SAML SSO per organisation |
+| IAM-17 | SCIM 2.0 provisioning (users, units, groups) |
+| IAM-18 | Enterprise custom roles |
+| IAM-19 | Authenticator-app MFA for admins |
+| IAM-20 | SMS / WhatsApp OTP through notify-hub (Termii) |
 
 ## 5. Gates (v1.0 §4, updated)
 
 1. **Seam gate.** No consumer slice before its contract is tagged. Contracts version bump rules unchanged (v1.0 §2.1).
 2. **Design gate.** Unchanged.
-3. **Security gate [NEW].** SEC-1 passes before INF-1 deploys anything reachable from the internet.
+3. **Security gate [NEW].** SEC-1 passes before INF-1 deploys anything reachable from the internet. Each later slice gets the same review before merge.
 4. **credSync gates.** Unchanged; credSync scopes change to (org, program_enrollment), (org, course_enrollment) and (course_version) per ERD v0.1 §12.
 
 ## 6. Open questions carried forward

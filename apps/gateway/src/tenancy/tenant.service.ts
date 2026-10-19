@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ClientProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
+import { RESERVED_SLUGS } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE } from '@lib/auth';
 import { AppException, notFound } from '@lib/common';
 import { InjectConfig } from '@lib/config';
@@ -18,7 +19,7 @@ const ORG_RESOLVE_PATTERN = 'iam.orgs.resolve';
 const POSITIVE_TTL_MS = 5 * 60_000;
 const NEGATIVE_TTL_MS = 30_000;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const RESERVED = new Set(['www', 'api', 'app', 'admin', 'static', 'cdn', 'mail']);
+const RESERVED = new Set<string>(RESERVED_SLUGS);
 
 /**
  * Maps a request's host (or, in development, the X-Tenant header) to an organisation.

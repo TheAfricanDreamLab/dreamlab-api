@@ -22,3 +22,11 @@ export const gatewayConfigSchema = baseConfigSchema.extend({
 });
 
 export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
+
+/** Settings that are fine in development but dangerous in production. */
+export const gatewayProductionSchema = gatewayConfigSchema.superRefine((c, ctx) => {
+  if (c.NODE_ENV !== 'production') return;
+  if (c.GATEWAY_ALLOW_TENANT_HEADER) ctx.addIssue({ code: 'custom', path: ['GATEWAY_ALLOW_TENANT_HEADER'], message: 'must be false in production' });
+  if (c.TRUST_PROXY === 'true') ctx.addIssue({ code: 'custom', path: ['TRUST_PROXY'], message: 'must name the proxies (hops or CIDRs), not true, in production' });
+  if (c.CORS_ORIGINS.some((o) => o.startsWith('http://'))) ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'only https origins in production' });
+});

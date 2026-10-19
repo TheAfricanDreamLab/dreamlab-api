@@ -9,7 +9,7 @@ const services = [
 const up = spawnSync('docker', ['compose', 'up', '-d', '--wait'], { stdio: 'inherit', shell: true });
 if (up.status !== 0) process.exit(up.status ?? 1);
 
-const children = services.map(({ name, color }, i) => {
+const children = services.map(({ name, color }) => {
   const child = spawn('pnpm', ['exec', 'nest', 'start', name, '--watch', '--preserveWatchOutput'], { shell: true, env: process.env });
   const prefix = `\x1b[${color}m[${name}]\x1b[0m `;
   const pipe = (stream, out) =>
@@ -17,7 +17,6 @@ const children = services.map(({ name, color }, i) => {
   pipe(child.stdout, process.stdout);
   pipe(child.stderr, process.stderr);
   child.on('exit', (code) => console.error(`${prefix}exited with ${code}`));
-  void i;
   return child;
 });
 

@@ -50,6 +50,10 @@ export class InvitationsService {
     const token = randomToken(32);
     const expiresAt = new Date(Date.now() + this.config.INVITATION_TTL_HOURS * 3600_000);
     const result = await this.db.tenant({ orgId, userId: principal.userId }, async (tx) => {
+      const [current] = await tx.select({ status: organizations.status }).from(organizations).where(eq(organizations.id, orgId));
+      if (current?.status === 'pending' && roleKeys.some((k) => k !== 'org_admin')) {
+        throw conflict('org_pending', 'Your organisation is awaiting approval. Until then you can only invite co-admins.');
+      }
       const found = await tx
         .select({ key: roles.key, scopeTypes: roles.scopeTypes })
         .from(roles)

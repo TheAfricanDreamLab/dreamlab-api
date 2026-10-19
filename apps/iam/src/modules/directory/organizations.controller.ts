@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { MessagePattern, Payload } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { apiV1Contract, SlugSchema } from '@dreamlab/contracts';
-import { CurrentPrincipal, Principal, Public, RequirePermission } from '@lib/auth';
+import { Authenticated, CurrentPrincipal, Principal, Public, RequirePermission } from '@lib/auth';
 import { notFound } from '@lib/common';
 import { ZodResponse } from 'nestjs-zod';
 import {
@@ -12,6 +12,7 @@ import {
   OrgListQueryDto,
   OrgParamsDto,
   PublicOrganizationDto,
+  SignUpOrganizationDto,
   SlugParamsDto,
   UpdateOrganizationDto,
 } from '../../common/dto';
@@ -33,6 +34,14 @@ export class OrganizationsController {
   @ZodResponse({ status: 201, type: OrganizationDto })
   create(@Body() dto: CreateOrganizationDto, @CurrentPrincipal() principal: Principal, @Meta() meta: RequestMeta) {
     return this.orgs.create(principal, dto, meta);
+  }
+
+  @Post('signup')
+  @Authenticated()
+  @ApiOperation({ summary: r.signUp.summary })
+  @ZodResponse({ status: 201, type: OrganizationDto })
+  signUp(@Body() dto: SignUpOrganizationDto, @CurrentPrincipal() principal: Principal, @Meta() meta: RequestMeta) {
+    return this.orgs.signUp(principal, dto, meta);
   }
 
   @Get()

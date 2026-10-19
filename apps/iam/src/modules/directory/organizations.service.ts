@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { z } from 'zod';
-import type { CreateOrganizationSchema, UpdateOrganizationSchema } from '@dreamlab/contracts';
+import type { CreateOrganizationSchema, SignUpOrganizationSchema, UpdateOrganizationSchema } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
-import { badRequest, conflict, forbidden, newId, notFound, randomToken, sha256 } from '@lib/common';
+import { badRequest, conflict, forbidden, InjectRedis, likeContains, newId, notFound, randomToken, RedisRateLimiter, sha256, tooManyRequests } from '@lib/common';
+import type Redis from 'ioredis';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
@@ -18,6 +19,11 @@ import { pageResult, toOrganization, toPublicOrganization } from './mappers';
 
 type CreateOrg = z.infer<typeof CreateOrganizationSchema>;
 type UpdateOrg = z.infer<typeof UpdateOrganizationSchema>;
+type SignUpOrg = z.infer<typeof SignUpOrganizationSchema>;
+
+/** Organisations of these kinds publish content or handle funds, so a platform admin approves them first. */
+const NEEDS_APPROVAL = new Set(['institution', 'partner', 'sponsor']);
+const SIGNUPS_PER_DAY = 3;
 const { organizations, memberships, roleAssignments, roles, invitations } = schema;
 
 const PROFILE_TABLES = {
@@ -34,9 +40,52 @@ export class OrganizationsService {
     @InjectConfig() private readonly config: IamConfig,
     @InjectOutbox() private readonly outbox: OutboxWriter,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
+    @InjectRedis() private readonly redis: Redis,
     private readonly authz: AuthzService,
     private readonly users: UsersRepository,
   ) {}
+
+  /**
+   * Self-service sign-up: the caller becomes org_admin. Enterprises are live at once; institutions,
+   * partners and sponsors stay pending (set-up only) until a platform admin approves them.
+   */
+  async signUp(principal: Principal, dto: SignUpOrg, meta: RequestMeta) {
+    const user = await this.users.findById(principal.userId);
+    if (!user || !UsersRepository.isAnyVerified(user)) {
+      throw forbidden('account_unverified', 'Verify your email or phone before creating an organisation');
+    }
+    const quota = await new RedisRateLimiter(this.redis, 'iam:rl:').hit(`org-signup:${user.id}`, SIGNUPS_PER_DAY, 86_400);
+    if (!quota.allowed) throw tooManyRequests('signup_limit', 'You have created several organisations today; try again tomorrow', quota.retryAfterSeconds);
+
+    const status = NEEDS_APPROVAL.has(dto.kind) ? ('pending' as const) : ('active' as const);
+    const org = await this.db.system(async (tx) => {
+      const [taken] = await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, dto.slug));
+      if (taken) throw conflict('slug_taken', 'That organisation name is already in use');
+      const [row] = await tx
+        .insert(organizations)
+        .values({ id: newId(), slug: dto.slug, name: dto.name, kinds: [dto.kind], status, dataRegion: dto.dataRegion })
+        .returning();
+      const orgId = row!.id;
+      if (dto.kind === 'enterprise') {
+        await tx.insert(schema.enterpriseProfiles).values({ orgId, industry: dto.profile.industry ?? null, sizeBand: dto.profile.sizeBand ?? null, accountOwnerUserId: user.id });
+      } else {
+        await tx.insert(PROFILE_TABLES[dto.kind]).values({ orgId });
+      }
+      const [orgAdmin] = await tx.select().from(roles).where(and(eq(roles.key, 'org_admin'), eq(roles.system, true)));
+      const membershipId = newId();
+      await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId, status: 'active', source: 'self', joinedAt: new Date() });
+      await tx.insert(roleAssignments).values({ id: newId(), orgId, membershipId, roleId: orgAdmin!.id, scopeType: 'org', grantedByUserId: user.id });
+      await this.authz.bumpVersion(tx, [user.id]);
+      await this.outbox.add(
+        tx,
+        { type: IamEvents.OrgCreated, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, slug: dto.slug, kinds: [dto.kind], status, selfService: true } },
+        { type: IamEvents.MemberJoined, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, membershipId, userId: user.id } },
+        { type: IamEvents.RoleGranted, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, membershipId, userId: user.id, roleKey: 'org_admin', scopeType: 'org' } },
+      );
+      return row!;
+    });
+    return toOrganization(org);
+  }
 
   /** Platform admins create tenants. Optionally makes (or invites) the first org admin. */
   async create(principal: Principal, dto: CreateOrg, meta: RequestMeta) {
@@ -83,14 +132,15 @@ export class OrganizationsService {
     return toOrganization(pendingInvite.org);
   }
 
-  async list(query: { limit: number; cursor?: string; q?: string; kind?: string }) {
+  async list(query: { limit: number; cursor?: string; q?: string; kind?: string; status?: 'pending' | 'active' | 'suspended' }) {
     const rows = await this.db.sys
       .select()
       .from(organizations)
       .where(
         and(
           query.cursor ? gt(organizations.id, query.cursor) : undefined,
-          query.q ? or(ilike(organizations.name, `%${query.q}%`), ilike(organizations.slug, `%${query.q}%`)) : undefined,
+          query.q ? or(ilike(organizations.name, likeContains(query.q)), ilike(organizations.slug, likeContains(query.q))) : undefined,
+          query.status ? eq(organizations.status, query.status) : undefined,
           query.kind ? arrayContains(organizations.kinds, [query.kind]) : undefined,
         ),
       )

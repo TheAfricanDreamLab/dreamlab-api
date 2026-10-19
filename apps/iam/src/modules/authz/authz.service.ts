@@ -9,6 +9,7 @@ import {
   ScopeTypeSchema,
 } from '@dreamlab/contracts';
 import {
+  authzVersionKey,
   AUTHZ_CHECK_PATTERN,
   AUTHZ_CHECKER,
   AuthzChecker,
@@ -66,10 +67,16 @@ export class AuthzService {
   /** Invalidate every cached authorization answer for these users (call inside the changing tx). */
   async bumpVersion(tx: IamTx, userIds: string[]): Promise<void> {
     if (userIds.length === 0) return;
-    await tx
+    const rows = await tx
       .update(users)
       .set({ authzVersion: sql`${users.authzVersion} + 1` })
-      .where(inArray(users.id, [...new Set(userIds)]));
+      .where(inArray(users.id, [...new Set(userIds)]))
+      .returning({ id: users.id, v: users.authzVersion });
+    // Every service's guard compares tokens with this; older tokens are re-checked with IAM.
+    // Tokens live ACCESS_TOKEN_TTL at most, so the marker only needs to outlive them.
+    const multi = this.redis.multi();
+    for (const r of rows) multi.set(authzVersionKey(r.id), String(r.v), 'EX', this.config.ACCESS_TOKEN_TTL_SECONDS + 120);
+    await multi.exec();
   }
 
   async isPlatformAdmin(userId: string): Promise<boolean> {
@@ -99,10 +106,19 @@ export class AuthzService {
     const cached = await this.redis.get(cacheKey);
     if (cached) return JSON.parse(cached) as OrgAccess | null;
 
+    // Suspended organisations grant nothing; pending ones can be set up by their admins.
     const [membership] = await this.db.sys
       .select({ id: memberships.id })
       .from(memberships)
-      .where(and(eq(memberships.userId, userId), eq(memberships.orgId, orgId), eq(memberships.status, 'active')));
+      .innerJoin(organizations, eq(organizations.id, memberships.orgId))
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          eq(memberships.orgId, orgId),
+          eq(memberships.status, 'active'),
+          inArray(organizations.status, ['active', 'pending']),
+        ),
+      );
     let access: OrgAccess | null = null;
     if (membership) {
       const rows = await this.db.sys

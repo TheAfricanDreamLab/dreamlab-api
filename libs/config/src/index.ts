@@ -21,8 +21,28 @@ export const baseConfigSchema = z.object({
   /** Issuer and audience of access tokens, shared by every service that verifies them. */
   AUTH_ISSUER: z.string().url(),
   AUTH_AUDIENCE: z.string().min(1).default('dreamlab-api'),
-  SWAGGER_ENABLED: booleanString.default('true'),
+  /** Unset = on outside production, off in production. */
+  SWAGGER_ENABLED: booleanString.optional(),
+  /**
+   * Which proxies may set X-Forwarded-For: `false`, `true`, a hop count, or comma-separated
+   * addresses / CIDRs / keywords (loopback, linklocal, uniquelocal). Never `true` in production:
+   * it lets any client choose its own IP and dodge per-IP rate limits.
+   */
+  TRUST_PROXY: z.string().default('loopback'),
+  /** Shared secret proving a request came through the gateway. 32+ characters. */
+  INTERNAL_GATEWAY_TOKEN: z.string().min(32),
 });
+
+export function swaggerEnabled(config: Pick<BaseConfig, 'SWAGGER_ENABLED' | 'NODE_ENV'>): boolean {
+  return config.SWAGGER_ENABLED ?? config.NODE_ENV !== 'production';
+}
+
+export function trustProxySetting(value: string): boolean | number | string[] {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value.split(',').map((v) => v.trim()).filter(Boolean);
+}
 export type BaseConfig = z.infer<typeof baseConfigSchema>;
 
 export { booleanString };

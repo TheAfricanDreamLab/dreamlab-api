@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
-import { bearerToken, JWT_VERIFIER, JwtVerifier, principalFromClaims, revokedSessionKey, TokenInvalidError } from '@lib/auth';
+import { bearerToken, checkTokenFreshness, JWT_VERIFIER, JwtVerifier, principalFromClaims, TokenInvalidError } from '@lib/auth';
 import { AppException, forbidden, InjectRedis, unauthorized } from '@lib/common';
 import { InjectConfig } from '@lib/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -8,7 +8,7 @@ import type { GatewayConfig } from '../config';
 import { TenantService } from '../tenancy/tenant.service';
 
 /** Headers only the gateway may set. Anything a client sends under these names is dropped. */
-const INTERNAL_HEADERS = ['x-tenant-org-id', 'x-tenant-slug', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip'];
+const INTERNAL_HEADERS = ['x-tenant-org-id', 'x-tenant-slug', 'x-gateway-token', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip'];
 const FORWARD_REQUEST_HEADERS = ['authorization', 'content-type', 'accept', 'accept-language', 'user-agent'];
 const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'www-authenticate'];
 /** A token for one organisation may still use these paths on another organisation's site (to switch). */
@@ -48,7 +48,11 @@ export class ProxyService {
         }
         throw err;
       }
-      if (await this.redis.exists(revokedSessionKey(principal.sessionId))) throw unauthorized('token_invalid', 'Session has ended');
+      try {
+        principal = await checkTokenFreshness(this.redis, principal);
+      } catch {
+        throw unauthorized('token_invalid', 'Session has ended');
+      }
       if (tenant && principal.orgId && principal.orgId !== tenant.id && !CONTEXT_NEUTRAL.some((re) => re.test(path))) {
         throw forbidden('org_context_mismatch', `This session is for another organisation. Switch to ${tenant.name} first.`);
       }
@@ -62,6 +66,7 @@ export class ProxyService {
     }
     for (const name of INTERNAL_HEADERS) delete headers[name];
     headers['x-request-id'] = String(req.id);
+    headers['x-gateway-token'] = this.config.INTERNAL_GATEWAY_TOKEN;
     headers['x-forwarded-for'] = req.ip;
     headers['x-forwarded-proto'] = req.protocol;
     if (tenant) {

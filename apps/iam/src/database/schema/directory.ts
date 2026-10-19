@@ -32,7 +32,7 @@ export const organizations = pgTable(
     slug: text('slug').notNull(),
     name: text('name').notNull(),
     kinds: text('kinds').array().notNull(),
-    status: text('status', { enum: ['active', 'suspended'] }).notNull().default('active'),
+    status: text('status', { enum: ['pending', 'active', 'suspended'] }).notNull().default('active'),
     branding: jsonb('branding').$type<Record<string, unknown>>().notNull().default({}),
     terminology: jsonb('terminology').$type<Record<string, string>>().notNull().default({}),
     dataRegion: text('data_region').notNull().default('ng'),
