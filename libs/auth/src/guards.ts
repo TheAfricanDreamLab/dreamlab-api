@@ -21,7 +21,10 @@ export const NO_ORG = '00000000-0000-0000-0000-000000000000';
 
 /** Revoked session: throws. Roles changed since the token was issued: marks the principal stale. */
 export async function checkTokenFreshness(redis: Redis, principal: Principal): Promise<Principal> {
-  const [revoked, version] = await redis.mget(revokedSessionKey(principal.sessionId), authzVersionKey(principal.userId));
+  // Two GETs in one round trip rather than MGET: the keys sit in different cluster slots.
+  const results = (await redis.pipeline().get(revokedSessionKey(principal.sessionId)).get(authzVersionKey(principal.userId)).exec()) ?? [];
+  for (const [err] of results) if (err) throw err;
+  const [revoked, version] = results.map(([, value]) => value as string | null);
   if (revoked) throw new TokenInvalidError('Session has ended', 'invalid');
   return version !== null && Number(version) > principal.authzVersion ? { ...principal, stale: true } : principal;
 }

@@ -106,7 +106,8 @@ afterAll(async () => {
 beforeEach(async () => {
   const redis = app.get<Redis>(REDIS);
   const keys = await redis.keys('iam:rl:*');
-  if (keys.length > 0) await redis.del(...keys);
+  // One key per DEL: the test Redis is clustered like Azure's, and these keys sit in different slots.
+  if (keys.length > 0) await keys.reduce((p, k) => p.del(k), redis.pipeline()).exec();
 });
 
 describe('contract parity', () => {
@@ -142,7 +143,7 @@ describe('authentication', () => {
 
     // The same token presented after the grace window means it leaked: the whole session ends.
     const redis = app.get<Redis>(REDIS);
-    const usedKey = `iam:rt-used:${sha256(tokens.refreshToken)}`;
+    const usedKey = `iam:rt-used:{${tokens.refreshToken.split('.')[0]}}:${sha256(tokens.refreshToken)}`;
     const used = JSON.parse((await redis.get(usedKey))!) as { sid: string; at: number };
     await redis.set(usedKey, JSON.stringify({ ...used, at: used.at - 60_000 }), 'KEEPTTL');
     const reuse = await request(app, 'POST', '/v1/auth/refresh', { body: { refreshToken: tokens.refreshToken } });

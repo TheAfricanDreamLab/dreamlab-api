@@ -30,6 +30,15 @@ interface RefreshRecord {
  */
 const REUSE_GRACE_MS = 20_000;
 
+/*
+ * A session's refresh-token keys share the hash tag {sessionId}, so they sit in one cluster slot and
+ * can change in one MULTI (Azure Managed Redis is clustered and refuses cross-slot transactions).
+ * Refresh tokens start with their session id, which gives the tag back when one is presented.
+ */
+const recordKey = (sid: string, hash: string): string => `iam:rt:{${sid}}:${hash}`;
+const currentKey = (sid: string): string => `iam:rt-cur:{${sid}}`;
+export const usedRefreshKey = (sid: string, hash: string): string => `iam:rt-used:{${sid}}:${hash}`;
+
 export type RefreshOutcome =
   | { kind: 'ok'; sessionId: string; userId: string }
   | { kind: 'reused'; sessionId: string }
@@ -84,35 +93,37 @@ export class TokenService {
   async issueRefreshToken(sessionId: string, userId: string): Promise<string> {
     const token = `${sessionId}.${randomToken(32)}`;
     const hash = sha256(token);
-    const previous = await this.redis.get(`iam:rt-cur:${sessionId}`);
+    const previous = await this.redis.get(currentKey(sessionId));
     const multi = this.redis.multi();
-    if (previous) multi.del(`iam:rt:${previous}`);
+    if (previous) multi.del(recordKey(sessionId, previous));
     multi
-      .set(`iam:rt:${hash}`, JSON.stringify({ sid: sessionId, uid: userId } satisfies RefreshRecord), 'EX', this.refreshTtl)
-      .set(`iam:rt-cur:${sessionId}`, hash, 'EX', this.refreshTtl);
+      .set(recordKey(sessionId, hash), JSON.stringify({ sid: sessionId, uid: userId } satisfies RefreshRecord), 'EX', this.refreshTtl)
+      .set(currentKey(sessionId), hash, 'EX', this.refreshTtl);
     await multi.exec();
     return token;
   }
 
   /** Consume a refresh token. Exactly one caller can consume a given token. */
   async consumeRefreshToken(token: string): Promise<RefreshOutcome> {
+    const sid = token.split('.', 1)[0];
+    if (!sid || sid === token) return { kind: 'invalid' };
     const hash = sha256(token);
-    const raw = await this.redis.getdel(`iam:rt:${hash}`);
+    const raw = await this.redis.getdel(recordKey(sid, hash));
     if (!raw) {
-      const used = await this.redis.get(`iam:rt-used:${hash}`);
+      const used = await this.redis.get(usedRefreshKey(sid, hash));
       if (!used) return { kind: 'invalid' };
-      const { sid, at } = JSON.parse(used) as { sid: string; at: number };
-      return Date.now() - at < REUSE_GRACE_MS ? { kind: 'superseded' } : { kind: 'reused', sessionId: sid };
+      const { sid: usedSid, at } = JSON.parse(used) as { sid: string; at: number };
+      return Date.now() - at < REUSE_GRACE_MS ? { kind: 'superseded' } : { kind: 'reused', sessionId: usedSid };
     }
     const record = JSON.parse(raw) as RefreshRecord;
-    await this.redis.set(`iam:rt-used:${hash}`, JSON.stringify({ sid: record.sid, at: Date.now() }), 'EX', this.refreshTtl);
+    await this.redis.set(usedRefreshKey(sid, hash), JSON.stringify({ sid: record.sid, at: Date.now() }), 'EX', this.refreshTtl);
     return { kind: 'ok', sessionId: record.sid, userId: record.uid };
   }
 
   async revokeRefreshTokens(sessionId: string): Promise<void> {
-    const current = await this.redis.get(`iam:rt-cur:${sessionId}`);
-    const multi = this.redis.multi().del(`iam:rt-cur:${sessionId}`);
-    if (current) multi.del(`iam:rt:${current}`);
+    const current = await this.redis.get(currentKey(sessionId));
+    const multi = this.redis.multi().del(currentKey(sessionId));
+    if (current) multi.del(recordKey(sessionId, current));
     await multi.exec();
   }
 }

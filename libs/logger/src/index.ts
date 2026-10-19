@@ -24,6 +24,7 @@ export class LoggerModule {
                 'req.headers.authorization',
                 'req.headers.cookie',
                 'req.headers["x-internal-token"]',
+                'req.headers["x-gateway-token"]',
                 'res.headers["set-cookie"]',
                 '*.password',
                 '*.newPassword',

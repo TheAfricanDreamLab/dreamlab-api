@@ -106,7 +106,8 @@ afterAll(async () => {
 beforeEach(async () => {
   const redis = app.get<Redis>(REDIS);
   const keys = await redis.keys('iam:rl:*');
-  if (keys.length > 0) await redis.del(...keys);
+  // One key per DEL: the test Redis is clustered like Azure's, and these keys sit in different slots.
+  if (keys.length > 0) await keys.reduce((p, k) => p.del(k), redis.pipeline()).exec();
 });
 
 describe('email domains and joining (IAM-14)', () => {
