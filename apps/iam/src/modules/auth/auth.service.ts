@@ -174,6 +174,9 @@ export class AuthService {
 
   async refresh(refreshToken: string, meta: RequestMeta): Promise<TokenResponse> {
     const outcome = await this.tokens.consumeRefreshToken(refreshToken);
+    if (outcome.kind === 'superseded') {
+      throw unauthorized('refresh_token_superseded', 'This refresh token was just rotated by another request; use the newer one');
+    }
     if (outcome.kind === 'reused') {
       await this.sessions.revoke({ sessionId: outcome.sessionId }, 'refresh_token_reuse', null, meta.requestId);
       throw unauthorized('refresh_token_reused', 'This sign-in was ended for your safety. Please sign in again.');

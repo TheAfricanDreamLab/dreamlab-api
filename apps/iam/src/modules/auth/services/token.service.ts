@@ -22,9 +22,17 @@ interface RefreshRecord {
   uid: string;
 }
 
+/**
+ * Browsers and web servers refresh in parallel (prefetches, several tabs). The same token presented
+ * again within this window is the losing side of that race; later reuse means the token leaked.
+ */
+const REUSE_GRACE_MS = 20_000;
+
 export type RefreshOutcome =
   | { kind: 'ok'; sessionId: string; userId: string }
   | { kind: 'reused'; sessionId: string }
+  /** Reused within the grace window: a benign race between parallel requests, not theft. */
+  | { kind: 'superseded' }
   | { kind: 'invalid' };
 
 /**
@@ -87,11 +95,13 @@ export class TokenService {
     const hash = sha256(token);
     const raw = await this.redis.getdel(`iam:rt:${hash}`);
     if (!raw) {
-      const reusedSid = await this.redis.get(`iam:rt-used:${hash}`);
-      return reusedSid ? { kind: 'reused', sessionId: reusedSid } : { kind: 'invalid' };
+      const used = await this.redis.get(`iam:rt-used:${hash}`);
+      if (!used) return { kind: 'invalid' };
+      const { sid, at } = JSON.parse(used) as { sid: string; at: number };
+      return Date.now() - at < REUSE_GRACE_MS ? { kind: 'superseded' } : { kind: 'reused', sessionId: sid };
     }
     const record = JSON.parse(raw) as RefreshRecord;
-    await this.redis.set(`iam:rt-used:${hash}`, record.sid, 'EX', this.refreshTtl);
+    await this.redis.set(`iam:rt-used:${hash}`, JSON.stringify({ sid: record.sid, at: Date.now() }), 'EX', this.refreshTtl);
     return { kind: 'ok', sessionId: record.sid, userId: record.uid };
   }
 

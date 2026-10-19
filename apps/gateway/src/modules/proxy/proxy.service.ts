@@ -12,7 +12,10 @@ const INTERNAL_HEADERS = ['x-tenant-org-id', 'x-tenant-slug', 'x-gateway-token',
 const FORWARD_REQUEST_HEADERS = ['authorization', 'content-type', 'accept', 'accept-language', 'user-agent'];
 const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'www-authenticate'];
 /** A token for one organisation may still use these paths on another organisation's site (to switch). */
-const CONTEXT_NEUTRAL = [/^\/v1\/auth\//, /^\/v1\/me$/, /^\/v1\/invitations\/accept$/, /^\/v1\/roles$/];
+const CONTEXT_NEUTRAL = [/^\/v1\/auth\//, /^\/v1\/me$/, /^\/v1\/invitations\/(accept|preview)$/, /^\/v1\/roles$/];
+
+/** Paths a signed-in user may call on any organisation's site, whatever their active organisation. */
+export const isContextNeutral = (path: string): boolean => CONTEXT_NEUTRAL.some((re) => re.test(path));
 
 @Injectable()
 export class ProxyService {
@@ -53,7 +56,7 @@ export class ProxyService {
       } catch {
         throw unauthorized('token_invalid', 'Session has ended');
       }
-      if (tenant && principal.orgId && principal.orgId !== tenant.id && !CONTEXT_NEUTRAL.some((re) => re.test(path))) {
+      if (tenant && principal.orgId && principal.orgId !== tenant.id && !isContextNeutral(path)) {
         throw forbidden('org_context_mismatch', `This session is for another organisation. Switch to ${tenant.name} first.`);
       }
     }

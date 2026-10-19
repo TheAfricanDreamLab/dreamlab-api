@@ -1,5 +1,6 @@
 import type { GatewayConfig } from './config';
 import { mergeDocuments } from './modules/docs/docs.service';
+import { isContextNeutral } from './modules/proxy/proxy.service';
 import { originMatcher } from './cors';
 import { TenantService } from './modules/tenancy/tenancy.service';
 
@@ -63,4 +64,17 @@ describe('mergeDocuments', () => {
     expect(merged.tags?.map((t) => t.name)).toEqual(['health', 'me']);
     expect(Object.keys(merged.components?.schemas ?? {})).toEqual(['A', 'B']);
   });
+});
+
+describe('context-neutral paths', () => {
+  it.each([
+    ['/v1/auth/switch-org', true],
+    ['/v1/me', true],
+    ['/v1/invitations/preview', true],
+    ['/v1/invitations/accept', true],
+    ['/v1/roles', true],
+    ['/v1/orgs/123/members', false],
+    ['/v1/invitations/preview/extra', false],
+    ['/v1/mexico', false],
+  ])('%s → %s', (path, expected) => expect(isContextNeutral(path)).toBe(expected));
 });
