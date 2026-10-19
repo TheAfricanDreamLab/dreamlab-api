@@ -20,7 +20,7 @@ Inputs: Starter ERD v0.1 (`dreamlab-api/docs/erd/`), planning decisions of 19 Oc
 | D8 | **Domain: theafricandreamlab.com.** Tenants at `<slug>.theafricandreamlab.com`, API at `api.theafricandreamlab.com`; the gateway takes the tenant from the Host or the browser Origin. | Plan §6.2 placeholder domain |
 | D9 | **Contracts are consumed as git tags** (`github:TheAfricanDreamLab/dreamlab-contracts#vX.Y.Z`) until an npm token exists. | v1.0 §2.1 (npm publish) |
 | D11 | **Self-service organisation sign-up.** Any verified user can create an organisation and becomes its admin. Enterprises go live at once; institutions, partners and sponsors stay `pending` (set-up only) until a platform admin approves them. | Platform-admin-only creation |
-| D12 | **Attribution.** Commits carry a `Co-Authored-By: Claude` trailer and PRs credit Claude Code (owner instruction, 19 Oct 2026). | v1.0 "Authorship" section |
+| D12 | **Authorship unchanged.** Commits, PRs and merge commits are authored as Ukeme only: no co-author trailers or tool credits (v1.0 "Authorship" holds). | — |
 | D10 | **Pinned majors:** Nest 11, Zod 3.25, TypeScript 5.9. Nest 12 is ESM-only and the Zod/OpenAPI bridge (`nestjs-zod`) and `ts-rest` do not yet support Nest 12 / Zod 4; upgrading is a hardening slice. | — |
 
 ## 2. Services
