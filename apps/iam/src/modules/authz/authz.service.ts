@@ -1,45 +1,15 @@
-import { Global, Injectable, Module } from '@nestjs/common';
-import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload } from '@nestjs/microservices';
-import {
-  PERMISSIONS,
-  Permission,
-  PermissionSchema,
-  ScopeType,
-  ScopeTypeSchema,
-} from '@dreamlab/contracts';
-import {
-  authzVersionKey,
-  AUTHZ_CHECK_PATTERN,
-  AUTHZ_CHECKER,
-  AuthzChecker,
-  AuthzCheckRequest,
-  AuthzCheckResponse,
-  orgPermissions,
-  Principal,
-} from '@lib/auth';
+import { Injectable } from '@nestjs/common';
+import { PERMISSIONS, Permission, ScopeType } from '@dreamlab/contracts';
+import { authzVersionKey, orgPermissions, Principal } from '@lib/auth';
 import { InjectRedis } from '@lib/common';
 import { InjectConfig } from '@lib/config';
-import { InjectDatabase, idToLabel } from '@lib/database';
+import { InjectDatabase } from '@lib/database';
 import { and, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
-import { z } from 'zod';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
-
-export interface Grant {
-  roleKey: string;
-  permissions: Permission[];
-  scopeType: ScopeType;
-  scopeId: string | null;
-  /** ltree path of the unit, for org_unit grants. */
-  unitPath: string | null;
-}
-
-export interface OrgAccess {
-  membershipId: string;
-  grants: Grant[];
-}
+import type { OrgAccess } from './interfaces/grant.interface';
+import { isAncestorOrSelf } from './utils/unit-path';
 
 const GRANTS_TTL_SECONDS = 60;
 const { memberships, roleAssignments, roles, users, organizations, orgUnits } = schema;
@@ -206,50 +176,3 @@ export class AuthzService {
     return [...orgPermissions(principal)].sort();
   }
 }
-
-export function isAncestorOrSelf(ancestor: string, path: string): boolean {
-  return path === ancestor || path.startsWith(`${ancestor}.`);
-}
-
-export const unitLabel = idToLabel;
-
-/** In-process checker used by IAM's own PermissionsGuard. */
-@Injectable()
-export class LocalAuthzChecker implements AuthzChecker {
-  constructor(private readonly authz: AuthzService) {}
-
-  check(r: AuthzCheckRequest): Promise<boolean> {
-    return this.authz.can(r.userId, r.orgId, r.permission, r.anyScope ? 'any' : r.scopeType ? { type: r.scopeType, id: r.scopeId } : undefined);
-  }
-}
-
-const AuthzCheckPayload = z.object({
-  userId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  permission: PermissionSchema,
-  scopeType: ScopeTypeSchema.optional(),
-  scopeId: z.string().uuid().optional(),
-  anyScope: z.boolean().optional(),
-  authzVersion: z.number().int(),
-});
-
-/** RabbitMQ RPC endpoint other services call through RpcAuthzChecker. */
-@Controller()
-export class AuthzRpcController {
-  constructor(private readonly checker: LocalAuthzChecker) {}
-
-  @MessagePattern(AUTHZ_CHECK_PATTERN)
-  async check(@Payload() payload: unknown): Promise<AuthzCheckResponse> {
-    const parsed = AuthzCheckPayload.safeParse(payload);
-    if (!parsed.success) return { allowed: false };
-    return { allowed: await this.checker.check(parsed.data) };
-  }
-}
-
-@Global()
-@Module({
-  controllers: [AuthzRpcController],
-  providers: [AuthzService, LocalAuthzChecker, { provide: AUTHZ_CHECKER, useExisting: LocalAuthzChecker }],
-  exports: [AuthzService, AUTHZ_CHECKER],
-})
-export class AuthzModule {}

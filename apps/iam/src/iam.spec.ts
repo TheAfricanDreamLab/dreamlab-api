@@ -1,10 +1,13 @@
 import { AppException, toErrorResponse } from '@lib/common';
 import { idToLabel, labelToId } from '@lib/database';
 import { emailProvider } from './config';
-import { isAncestorOrSelf } from './modules/authz/authz.service';
-import { pickSlug, slugify } from './modules/directory/slug';
-import { escapeHtml, parseFrom, ZeptoMailEmailSender } from './modules/notifications/email';
-import { channelFor, maskDestination } from './modules/notifications/notifier';
+import { isAncestorOrSelf } from './modules/authz/utils/unit-path';
+import { ZeptoMailEmailSender } from './modules/notifications/providers/zeptomail.email-sender';
+import { channelFor } from './modules/notifications/utils/channel-for';
+import { escapeHtml } from './modules/notifications/utils/escape-html';
+import { maskDestination } from './modules/notifications/utils/mask-destination';
+import { parseFrom } from './modules/notifications/utils/parse-from';
+import { pickSlug, slugify } from './modules/organizations/utils/slug';
 
 describe('org unit paths', () => {
   it('round-trips ids through ltree labels', () => {

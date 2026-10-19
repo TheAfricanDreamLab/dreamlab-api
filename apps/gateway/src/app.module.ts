@@ -10,10 +10,8 @@ import { MessagingModule, RABBIT, RabbitConnection } from '@lib/messaging';
 import type Redis from 'ioredis';
 import { ZodValidationPipe } from 'nestjs-zod';
 import type { GatewayConfig } from './config';
-import { DocsService } from './docs/docs.service';
-import { ProxyController } from './proxy/proxy.controller';
-import { ProxyService } from './proxy/proxy.service';
-import { TenantService } from './tenancy/tenant.service';
+import { DocsModule } from './modules/docs/docs.module';
+import { ProxyModule } from './modules/proxy/proxy.module';
 
 @Module({})
 export class GatewayAppModule {
@@ -46,12 +44,10 @@ export class GatewayAppModule {
             },
           ],
         }),
+        ProxyModule,
+        DocsModule,
       ],
-      controllers: [ProxyController],
       providers: [
-        TenantService,
-        ProxyService,
-        DocsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },

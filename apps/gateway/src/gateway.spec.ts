@@ -1,7 +1,7 @@
 import type { GatewayConfig } from './config';
-import { mergeDocuments } from './docs/docs.service';
+import { mergeDocuments } from './modules/docs/docs.service';
 import { originMatcher } from './cors';
-import { TenantService } from './tenancy/tenant.service';
+import { TenantService } from './modules/tenancy/tenancy.service';
 
 jest.mock('@nestjs/microservices', () => ({
   ...jest.requireActual('@nestjs/microservices'),

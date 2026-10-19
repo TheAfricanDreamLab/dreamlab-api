@@ -22,6 +22,19 @@ libs/
   testing/    Testcontainers global setup and request helpers
 ```
 
+Inside an app, code is grouped per feature under `src/modules/<feature>/`:
+
+```
+<feature>.module.ts       Nest module: what the feature declares, imports and exports
+<feature>.controller.ts   main controller        controllers/   any further controllers (incl. RabbitMQ RPC)
+<feature>.service.ts      main service           services/      any further services
+dto/                      one file per request/response topic, each a createZodDto(...) of a @dreamlab/contracts schema
+entities/                 Drizzle tables, one table per *.entity.ts (IAM's database/schema.ts gathers them)
+interfaces/  utils/  providers/   types, pure helpers and pluggable implementations used only by that feature
+```
+
+IAM's features are `auth`, `users`, `keys`, `otp`, `notifications`, `authz`, `organizations`, `members`, `invitations`, `org-structure`, `me` and `seed`; cross-feature helpers live in `src/common/` (request-meta decorator, row→response mappers, shared DTOs) and `src/database/` (schema barrel, column helpers, migrations). The gateway's are `proxy`, `tenancy` and `docs`.
+
 Rules enforced by lint: an app imports only from `libs/`, never another app; libraries never import apps. Each service owns its own database (`dreamlab_<service>`), with three roles: `<svc>_owner` (migrations), `<svc>_app` (row-level security enforced) and `<svc>_system` (BYPASSRLS, for deliberate cross-tenant work).
 
 Request and response shapes come from [`@dreamlab/contracts`](https://github.com/TheAfricanDreamLab/dreamlab-contracts), pinned to an exact tag.

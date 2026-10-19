@@ -6,7 +6,7 @@ import { CONTRACTS_VERSION } from '@dreamlab/contracts';
 import { GatewayAppModule } from './app.module';
 import { gatewayProductionSchema } from './config';
 import { originMatcher } from './cors';
-import { DocsService } from './docs/docs.service';
+import { DocsService } from './modules/docs/docs.service';
 
 async function bootstrap(): Promise<void> {
   loadDotEnv();

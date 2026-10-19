@@ -6,7 +6,7 @@ import { InjectDatabase } from '@lib/database';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
-import { PasswordService } from '../auth/password.service';
+import { PasswordService } from '../auth/services/password.service';
 
 const { roles, organizations, users, memberships, roleAssignments } = schema;
 

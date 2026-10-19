@@ -24,16 +24,17 @@ import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
 import type Redis from 'ioredis';
+import type { RequestMeta } from '../../common/interfaces/request-meta.interface';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
 import { IamEvents } from '../../events';
 import { AuthzService } from '../authz/authz.service';
-import { GoogleIdentityService } from './google.service';
 import { OtpService, OtpVerification } from '../otp/otp.service';
 import { isEmail, UserRow, UsersRepository } from '../users/users.repository';
-import { PasswordService } from './password.service';
-import { RequestMeta, SessionRow, SessionsService } from './sessions.service';
-import { TokenService } from './token.service';
+import { GoogleIdentityService } from './services/google-identity.service';
+import { PasswordService } from './services/password.service';
+import { SessionRow, SessionsService } from './services/sessions.service';
+import { TokenService } from './services/token.service';
 
 interface TokenContext {
   orgId: string | null;

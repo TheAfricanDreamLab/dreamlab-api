@@ -5,7 +5,10 @@ import { InjectConfig } from '@lib/config';
 import type Redis from 'ioredis';
 import { randomInt } from 'node:crypto';
 import type { IamConfig } from '../../config';
-import { channelFor, maskDestination, NOTIFIER, Notifier } from '../notifications/notifier';
+import type { Notifier } from '../notifications/interfaces/notifier.interface';
+import { NOTIFIER } from '../notifications/notifier.service';
+import { channelFor } from '../notifications/utils/channel-for';
+import { maskDestination } from '../notifications/utils/mask-destination';
 
 export type OtpVerification = 'ok' | 'invalid' | 'expired' | 'exhausted';
 

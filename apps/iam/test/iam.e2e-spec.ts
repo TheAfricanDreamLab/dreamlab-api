@@ -14,7 +14,8 @@ import { Logger } from 'nestjs-pino';
 import { IamAppModule } from '../src/app.module';
 import { iamConfigSchema } from '../src/config';
 import { IamDatabase, iamMigrationsFolder, schema } from '../src/database';
-import { NOTIFIER, Notifier, OtpMessage } from '../src/modules/notifications/notifier';
+import type { Notifier, OtpMessage } from '../src/modules/notifications/interfaces/notifier.interface';
+import { NOTIFIER } from '../src/modules/notifications/notifier.service';
 import { installGatewayTrust } from '../src/gateway-trust';
 import { SeedService } from '../src/modules/seed/seed.service';
 

@@ -1,31 +1,21 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { apiV1Contract, wellKnownContract } from '@dreamlab/contracts';
+import { apiV1Contract } from '@dreamlab/contracts';
 import { Authenticated, CurrentPrincipal, Principal, Public } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
-import {
-  EmptyBodyDto,
-  GoogleSignInDto,
-  JwksDto,
-  LoginDto,
-  OtpAcceptedDto,
-  OtpLoginDto,
-  OtpRequestDto,
-  PasswordChangeDto,
-  PasswordResetDto,
-  RefreshDto,
-  RegisterDto,
-  RegisterResponseDto,
-  SessionListDto,
-  SessionParamsDto,
-  SwitchOrgDto,
-  TokenResponseDto,
-  VerifyDto,
-} from '../../common/dto';
-import { Meta } from '../../common/request-meta';
-import { SigningKeysService } from '../keys/signing-keys.service';
+import { Meta } from '../../common/decorators/request-meta.decorator';
+import type { RequestMeta } from '../../common/interfaces/request-meta.interface';
 import { AuthService } from './auth.service';
-import type { RequestMeta } from './sessions.service';
+import { EmptyBodyDto } from './dto/empty-body.dto';
+import { GoogleSignInDto } from './dto/google-sign-in.dto';
+import { LoginDto, OtpLoginDto } from './dto/login.dto';
+import { OtpAcceptedDto, OtpRequestDto, VerifyDto } from './dto/otp.dto';
+import { PasswordChangeDto, PasswordResetDto } from './dto/password.dto';
+import { RefreshDto } from './dto/refresh.dto';
+import { RegisterDto, RegisterResponseDto } from './dto/register.dto';
+import { SessionListDto, SessionParamsDto } from './dto/session.dto';
+import { SwitchOrgDto } from './dto/switch-org.dto';
+import { TokenResponseDto } from './dto/token-response.dto';
 
 const r = apiV1Contract.auth;
 
@@ -144,19 +134,5 @@ export class AuthController {
   @ApiOperation({ summary: r.revokeSession.summary })
   async revokeSession(@Param() params: SessionParamsDto, @CurrentPrincipal() principal: Principal, @Meta() meta: RequestMeta) {
     await this.auth.revokeSession(principal, params.sessionId, meta);
-  }
-}
-
-@ApiTags('auth')
-@Controller('.well-known')
-export class WellKnownController {
-  constructor(private readonly keys: SigningKeysService) {}
-
-  @Get('jwks.json')
-  @Public()
-  @ApiOperation({ summary: wellKnownContract.jwks.summary })
-  @ZodResponse({ status: 200, type: JwksDto })
-  jwks() {
-    return this.keys.jwks();
   }
 }
