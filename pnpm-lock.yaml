@@ -13,8 +13,8 @@ importers:
   .:
     dependencies:
       '@dreamlab/contracts':
-        specifier: github:TheAfricanDreamLab/dreamlab-contracts#v0.6.0
-        version: https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/79dcd49ac7b56e5b027238158d9376128898049a(@ts-rest/core@3.52.1(@types/node@22.20.5)(zod@3.25.76))(zod@3.25.76)
+        specifier: github:TheAfricanDreamLab/dreamlab-contracts#v0.7.0
+        version: https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/a896c2d3bcf8264be32817b615abd0a5ebbb3f63(@ts-rest/core@3.52.1(@types/node@22.20.5)(zod@3.25.76))(zod@3.25.76)
       '@fastify/static':
         specifier: 10.1.6
         version: 10.1.6
@@ -379,9 +379,9 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@dreamlab/contracts@https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/79dcd49ac7b56e5b027238158d9376128898049a':
-    resolution: {tarball: https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/79dcd49ac7b56e5b027238158d9376128898049a}
-    version: 0.6.0
+  '@dreamlab/contracts@https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/a896c2d3bcf8264be32817b615abd0a5ebbb3f63':
+    resolution: {tarball: https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/a896c2d3bcf8264be32817b615abd0a5ebbb3f63}
+    version: 0.7.0
     engines: {node: '>=20'}
     peerDependencies:
       '@ts-rest/core': ^3.52.1
@@ -4721,7 +4721,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@dreamlab/contracts@https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/79dcd49ac7b56e5b027238158d9376128898049a(@ts-rest/core@3.52.1(@types/node@22.20.5)(zod@3.25.76))(zod@3.25.76)':
+  '@dreamlab/contracts@https://codeload.github.com/TheAfricanDreamLab/dreamlab-contracts/tar.gz/a896c2d3bcf8264be32817b615abd0a5ebbb3f63(@ts-rest/core@3.52.1(@types/node@22.20.5)(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       '@ts-rest/core': 3.52.1(@types/node@22.20.5)(zod@3.25.76)
       zod: 3.25.76

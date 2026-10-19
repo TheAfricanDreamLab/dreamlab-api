@@ -21,6 +21,9 @@ const CONTEXT_NEUTRAL = [
   /^\/v1\/orgs\/[0-9a-f-]{36}\/join$/,
   /^\/v1\/invitations\/(accept|preview)$/,
   /^\/v1\/roles$/,
+  // A learner's courses go with them, whichever organisation's site they are on.
+  /^\/v1\/catalog\//,
+  /^\/v1\/learning\//,
 ];
 
 /** Paths a signed-in user may call on any organisation's site, whatever their active organisation. */

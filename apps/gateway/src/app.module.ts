@@ -35,13 +35,14 @@ export class GatewayAppModule {
           useFactory: (redis: Redis, rabbit: RabbitConnection) => [
             { name: 'redis', check: () => redis.ping() },
             { name: 'rabbitmq', check: async () => { if (!rabbit.isConnected()) throw new Error('not connected'); } },
-            {
-              name: 'iam',
+            ...(['iam', 'catalog', 'learning'] as const).map((name) => ({
+              name,
               check: async () => {
-                const res = await fetch(new URL('/health', config.IAM_URL), { signal: AbortSignal.timeout(2500) });
+                const base = { iam: config.IAM_URL, catalog: config.CATALOG_URL, learning: config.LEARNING_URL }[name];
+                const res = await fetch(new URL('/health', base), { signal: AbortSignal.timeout(2500) });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
               },
-            },
+            })),
           ],
         }),
         ProxyModule,

@@ -3,6 +3,7 @@ const base = require('./jest.config');
 
 module.exports = {
   ...base,
+  roots: ['<rootDir>/apps', '<rootDir>/libs', '<rootDir>/test'],
   testMatch: ['**/*.e2e-spec.ts'],
   testTimeout: 120_000,
   // AMQP client reconnect timers can outlive app.close(); containers are torn down in globalTeardown anyway.

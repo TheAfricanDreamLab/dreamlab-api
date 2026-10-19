@@ -8,7 +8,7 @@ import { CONTRACTS_VERSION } from '@dreamlab/contracts';
 import { IamAppModule } from './app.module';
 import { iamProductionSchema } from './config';
 import { iamMigrationsFolder } from './database';
-import { installGatewayTrust } from './gateway-trust';
+import { installGatewayTrust } from '@lib/common';
 import { SeedService } from './modules/seed/seed.service';
 
 async function bootstrap(): Promise<void> {

@@ -22,6 +22,7 @@ import { MembersModule } from './modules/members/members.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OrgStructureModule } from './modules/org-structure/org-structure.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { PlatformModule } from './modules/platform/platform.module';
 import { ScimModule } from './modules/scim/scim.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { SsoModule } from './modules/sso/sso.module';
@@ -64,6 +65,7 @@ export class IamAppModule {
         DomainsModule,
         SsoModule,
         ScimModule,
+        PlatformModule,
         SeedModule,
         HealthModule.forRoot({
           inject: [DATABASE, REDIS, RABBIT],

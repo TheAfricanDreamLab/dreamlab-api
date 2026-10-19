@@ -20,7 +20,7 @@ import { SignedXml } from 'xml-crypto';
 import { IamAppModule } from '../src/app.module';
 import { iamConfigSchema } from '../src/config';
 import { IamDatabase, iamMigrationsFolder, schema } from '../src/database';
-import { installGatewayTrust } from '../src/gateway-trust';
+import { installGatewayTrust } from '@lib/common';
 import { totp } from '../src/modules/auth/utils/totp';
 import { TXT_LOOKUP } from '../src/modules/domains/domains.service';
 import { verificationRecordName } from '../src/modules/domains/utils/dns-txt';

@@ -34,6 +34,38 @@
           }
         ]
       }
+    },
+    "catalog": {
+      "type": "application",
+      "root": "apps/catalog",
+      "entryFile": "main",
+      "sourceRoot": "apps/catalog/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/catalog/tsconfig.app.json",
+        "assets": [
+          {
+            "include": "database/migrations/**/*",
+            "outDir": "dist/apps/catalog",
+            "watchAssets": true
+          }
+        ]
+      }
+    },
+    "learning": {
+      "type": "application",
+      "root": "apps/learning",
+      "entryFile": "main",
+      "sourceRoot": "apps/learning/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/learning/tsconfig.app.json",
+        "assets": [
+          {
+            "include": "database/migrations/**/*",
+            "outDir": "dist/apps/learning",
+            "watchAssets": true
+          }
+        ]
+      }
     }
   }
 }
