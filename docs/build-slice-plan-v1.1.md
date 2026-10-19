@@ -28,7 +28,7 @@ Inputs: Starter ERD v0.1 (`dreamlab-api/docs/erd/`), planning decisions of 19 Oc
 | Service | Owns (ERD v0.1 §) | Status |
 |---|---|---|
 | `gateway` | Nothing persistent. Tenant resolution, edge token check, rate limits, routing, aggregated Swagger | **P0 — built** |
-| `iam` | Users, identities, sessions, consent, signing keys, organisations + profiles, domains, SSO/SCIM (tables), org units, groups, memberships, invitations, roles, role assignments (§4, §13 credits later) | **P0 — built** |
+| `iam` | Users, identities, sessions, consent, signing keys, organisations + profiles, domains, SSO, SCIM, MFA, org units, groups, memberships, invitations, roles (incl. custom), role assignments (§4, §13 credits later) | **P0 + enterprise identity — built** |
 | `catalog` | Courses → versions → modules → items, programs, collections, listings, instructor profiles and credits (§5, §6, §13) | P2 |
 | `learning` | Cohorts, runs, sessions, enrollments, progress, submissions, grades, attendance, assigned learning (§6, §7, §9) | P2–P3 |
 | `commerce` | Offers, orders, payments, subscriptions, contracts, seats, sponsorships, access grants (§8) | After Cohort 04 starts |
@@ -44,25 +44,25 @@ All in milestone **P0 - Foundations**. Issue numbers are in each repo.
 | CT-1 + CT-2 — contracts bootstrap, auth + directory contracts | contracts | #1 | Done — `v0.1.0` |
 | — Google sign-in route | contracts | PR #3 | Done — `v0.2.0` |
 | — Organisation self sign-up, `pending` status | contracts | PR #4 | Done — `v0.3.0` |
-| API-1 — Nest monorepo (gateway + iam) | api | #3 | Built, in PR |
-| API-2 — shared libs: config, logging, database, health | api | #4 | Built, in PR |
-| API-3 — local stack + Testcontainers harness | api | #5 | Built, in PR |
-| API-4 — messaging: envelope, outbox relay, inbox | api | #6 | Built, in PR |
-| IAM-1 — identity schema | api | #7 | Built, in PR |
-| IAM-2 — directory schema + seed | api | #8 | Built, in PR |
-| IAM-3 — tenant isolation (RLS) | api | #9 | Built, in PR |
-| IAM-4 — registration + OTP verification | api | #10 | Built, in PR |
-| IAM-5 — login, tokens, JWKS, rotating refresh | api | #11 | Built, in PR |
-| IAM-6 — password reset, OTP login, lockout, audit events | api | #12 | Built, in PR |
-| IAM-7 — permission catalog + effective permissions | api | #13 | Built, in PR |
-| IAM-8 — org switching + personal context | api | #14 | Built, in PR |
-| IAM-9 — libs/auth guards, decorators, RPC authz client | api | #15 | Built, in PR |
-| IAM-10 — directory APIs | api | #16 | Built, in PR |
-| **IAM-11 — Google sign-up / sign-in** [NEW] | api | #18 | Built, in PR |
-| **IAM-12 — email through Resend / ZeptoMail** [NEW] | api | #19 | Built, in PR |
-| **IAM-13 — self-service organisation sign-up with approval** [NEW] | api | #20 | Built, in PR |
-| GW-1 — gateway | api | #17 | Built, in PR |
-| **SEC-1 — security hardening pass on P0** [NEW] | api | #21 | Built, in PR |
+| API-1 — Nest monorepo (gateway + iam) | api | #3 | Done (merged) |
+| API-2 — shared libs: config, logging, database, health | api | #4 | Done (merged) |
+| API-3 — local stack + Testcontainers harness | api | #5 | Done (merged) |
+| API-4 — messaging: envelope, outbox relay, inbox | api | #6 | Done (merged) |
+| IAM-1 — identity schema | api | #7 | Done (merged) |
+| IAM-2 — directory schema + seed | api | #8 | Done (merged) |
+| IAM-3 — tenant isolation (RLS) | api | #9 | Done (merged) |
+| IAM-4 — registration + OTP verification | api | #10 | Done (merged) |
+| IAM-5 — login, tokens, JWKS, rotating refresh | api | #11 | Done (merged) |
+| IAM-6 — password reset, OTP login, lockout, audit events | api | #12 | Done (merged) |
+| IAM-7 — permission catalog + effective permissions | api | #13 | Done (merged) |
+| IAM-8 — org switching + personal context | api | #14 | Done (merged) |
+| IAM-9 — libs/auth guards, decorators, RPC authz client | api | #15 | Done (merged) |
+| IAM-10 — directory APIs | api | #16 | Done (merged) |
+| **IAM-11 — Google sign-up / sign-in** [NEW] | api | #18 | Done (merged) |
+| **IAM-12 — email through Resend / ZeptoMail** [NEW] | api | #19 | Done (merged) |
+| **IAM-13 — self-service organisation sign-up with approval** [NEW] | api | #20 | Done (merged) |
+| GW-1 — gateway | api | #17 | Done (merged) |
+| **SEC-1 — security hardening pass on P0** [NEW] | api | #21 | Done (merged) |
 | INF-1 (revised) — deploy gateway + iam stack | infra | #1 | Next |
 | INF-2 (revised) — backups + restore drill per database | infra | #2 | Next |
 | API-5 — curriculum seed as program data (ERD §6) | api | to open | Moves to the catalog service (P2) |
@@ -70,19 +70,19 @@ All in milestone **P0 - Foundations**. Issue numbers are in each repo.
 
 Removed from v1.0 P0: API-2 as `institutions` / `institution_members` (replaced by IAM-1/2/3).
 
-## 4. Later IAM slices (enterprise phase, after Cohort 04 starts)
+## 4. Enterprise identity slices (IAM-14..20)
 
-Renumbered from the 19 Oct plan to make room for IAM-11/12/13:
+Brought forward from "after Cohort 04 starts" on 19 Oct 2026. Contracts `v0.6.0`. Admin guide: [enterprise-identity.md](enterprise-identity.md).
 
-| Slice | Scope |
-|---|---|
-| IAM-14 | Domain verification and auto-join (`org_domains.join_policy`) |
-| IAM-15 | OIDC SSO per organisation |
-| IAM-16 | SAML SSO per organisation |
-| IAM-17 | SCIM 2.0 provisioning (users, units, groups) |
-| IAM-18 | Enterprise custom roles |
-| IAM-19 | Authenticator-app MFA for admins |
-| IAM-20 | SMS / WhatsApp OTP through notify-hub (Termii) |
+| Slice | Scope | Status |
+|---|---|---|
+| IAM-14 | Email domains: claim, DNS TXT verification, join policy (none / request / auto), joinable orgs, join requests | Built, in PR |
+| IAM-15 | OIDC single sign-on per organisation (code flow + PKCE, state, nonce), test, enable, enforce | Built, in PR |
+| IAM-16 | SAML 2.0 single sign-on per organisation (SP-initiated, signed assertions, InResponseTo), SP metadata | Built, in PR |
+| IAM-17 | SCIM 2.0 provisioning: Users and Groups, bearer token per organisation | Built, in PR |
+| IAM-18 | Enterprise custom roles (no platform permissions), live permission changes | Built, in PR |
+| IAM-19 | Authenticator-app MFA (TOTP, recovery codes, step-up); organisations can require it for admin permissions | Built, in PR |
+| IAM-20 | SMS and WhatsApp codes through Termii (notify-hub can replace the sender later) | Built, in PR |
 
 ## 5. Gates (v1.0 §4, updated)
 
