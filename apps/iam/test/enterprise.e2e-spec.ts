@@ -160,9 +160,10 @@ describe('custom roles (IAM-18)', () => {
   it('an organisation defines a role; holders get exactly its permissions, and changes apply at once', async () => {
     const { orgId, tokens } = await enterprise('founder@umbrella.test', 'Umbrella');
     const bad = await request(app, 'POST', `/v1/orgs/${orgId}/roles`, { token: tokens.accessToken, body: { name: 'Root', permissions: ['platform.orgs.manage'] } });
-    expect(bad.body).toMatchObject({ code: 'permission_not_allowed' });
+    // The contract refuses platform permissions and built-in keys before the service sees them.
+    expect(bad.body).toMatchObject({ code: 'validation_failed' });
     const reserved = await request(app, 'POST', `/v1/orgs/${orgId}/roles`, { token: tokens.accessToken, body: { key: 'org_admin', name: 'Admin', permissions: ['org.read'] } });
-    expect(reserved.status).toBe(409);
+    expect(reserved.body).toMatchObject({ code: 'validation_failed' });
 
     const role = await request(app, 'POST', `/v1/orgs/${orgId}/roles`, {
       token: tokens.accessToken,
