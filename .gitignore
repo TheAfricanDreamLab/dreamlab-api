@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 !.env.example
 .logs/
+
+# Playwright output
+test-results/
+playwright-report/
