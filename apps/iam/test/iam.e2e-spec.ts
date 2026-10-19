@@ -402,3 +402,18 @@ describe('organisation sign-up', () => {
     expect((await request(app, 'GET', `/v1/orgs/${org}/members`, { token: secondToken })).status).toBe(403);
   });
 });
+
+describe('organisation slugs', () => {
+  it('generates a free slug from the name when none is given', async () => {
+    const user = await signUp('slugs@example.com');
+    const first = await request(app, 'POST', '/v1/orgs/signup', { token: user.accessToken, body: { name: 'Kano Coding Club', kind: 'enterprise' } });
+    const second = await request(app, 'POST', '/v1/orgs/signup', { token: user.accessToken, body: { name: 'Kano Coding Club', kind: 'enterprise' } });
+    expect(first.body).toMatchObject({ slug: 'kano-coding-club' });
+    expect(second.body).toMatchObject({ slug: 'kano-coding-club-2' });
+    const explicit = await request(app, 'POST', '/v1/orgs/signup', {
+      token: user.accessToken,
+      body: { slug: 'kano-coding-club', name: 'Copycat', kind: 'enterprise' },
+    });
+    expect(explicit.body).toMatchObject({ code: 'slug_taken' });
+  });
+});

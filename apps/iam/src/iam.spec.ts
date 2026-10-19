@@ -2,6 +2,7 @@ import { AppException, toErrorResponse } from '@lib/common';
 import { idToLabel, labelToId } from '@lib/database';
 import { emailProvider } from './config';
 import { isAncestorOrSelf } from './modules/authz/authz.service';
+import { pickSlug, slugify } from './modules/directory/slug';
 import { escapeHtml, parseFrom, ZeptoMailEmailSender } from './modules/notifications/email';
 import { channelFor, maskDestination } from './modules/notifications/notifier';
 
@@ -83,5 +84,28 @@ describe('error responses', () => {
       message: 'Internal server error',
       code: 'internal_error',
     });
+  });
+});
+
+
+describe('organisation slugs', () => {
+  it.each([
+    ['Lagos Business School', 'lagos-business-school'],
+    ['Ọ̀yọ́ Tech Hub', 'oyo-tech-hub'],
+    ['Smith & Sons Ltd.', 'smith-and-sons-ltd'],
+    ['  --Acme!!  ', 'acme'],
+    ['AI', 'ai-org'],
+    ['API', 'api-org'],
+    ['@@@', 'org'],
+  ])('%s → %s', (name, expected) => expect(slugify(name)).toBe(expected));
+
+  it('stays within the subdomain limit', () => {
+    expect(slugify('x'.repeat(200)).length).toBeLessThanOrEqual(57);
+  });
+
+  it('suffixes when the name is taken', async () => {
+    const taken = new Set(['acme', 'acme-2']);
+    await expect(pickSlug('Acme', async (c) => new Set(c.filter((s) => taken.has(s))))).resolves.toBe('acme-3');
+    await expect(pickSlug('Fresh Co', async () => new Set())).resolves.toBe('fresh-co');
   });
 });

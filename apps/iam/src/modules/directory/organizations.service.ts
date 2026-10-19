@@ -7,7 +7,7 @@ import type Redis from 'ioredis';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
-import { and, arrayContains, asc, eq, gt, ilike, or } from 'drizzle-orm';
+import { and, arrayContains, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
 import { IamEvents } from '../../events';
@@ -16,6 +16,7 @@ import { AuthzService } from '../authz/authz.service';
 import { NOTIFIER, Notifier } from '../notifications/notifier';
 import { UsersRepository } from '../users/users.repository';
 import { pageResult, toOrganization, toPublicOrganization } from './mappers';
+import { pickSlug } from './slug';
 
 type CreateOrg = z.infer<typeof CreateOrganizationSchema>;
 type UpdateOrg = z.infer<typeof UpdateOrganizationSchema>;
@@ -59,11 +60,10 @@ export class OrganizationsService {
 
     const status = NEEDS_APPROVAL.has(dto.kind) ? ('pending' as const) : ('active' as const);
     const org = await this.db.system(async (tx) => {
-      const [taken] = await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, dto.slug));
-      if (taken) throw conflict('slug_taken', 'That organisation name is already in use');
+      const slug = await this.resolveSlug(tx, dto.slug, dto.name);
       const [row] = await tx
         .insert(organizations)
-        .values({ id: newId(), slug: dto.slug, name: dto.name, kinds: [dto.kind], status, dataRegion: dto.dataRegion })
+        .values({ id: newId(), slug, name: dto.name, kinds: [dto.kind], status, dataRegion: dto.dataRegion })
         .returning();
       const orgId = row!.id;
       if (dto.kind === 'enterprise') {
@@ -78,7 +78,7 @@ export class OrganizationsService {
       await this.authz.bumpVersion(tx, [user.id]);
       await this.outbox.add(
         tx,
-        { type: IamEvents.OrgCreated, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, slug: dto.slug, kinds: [dto.kind], status, selfService: true } },
+        { type: IamEvents.OrgCreated, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, slug: row!.slug, kinds: [dto.kind], status, selfService: true } },
         { type: IamEvents.MemberJoined, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, membershipId, userId: user.id } },
         { type: IamEvents.RoleGranted, orgId, actor: userActor(user.id), requestId: meta.requestId, payload: { orgId, membershipId, userId: user.id, roleKey: 'org_admin', scopeType: 'org' } },
       );
@@ -90,8 +90,7 @@ export class OrganizationsService {
   /** Platform admins create tenants. Optionally makes (or invites) the first org admin. */
   async create(principal: Principal, dto: CreateOrg, meta: RequestMeta) {
     const pendingInvite = await this.db.system(async (tx) => {
-      const [taken] = await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, dto.slug));
-      if (taken) throw conflict('slug_taken', 'That organisation slug is already in use');
+      const slug = await this.resolveSlug(tx, dto.slug, dto.name);
       if (dto.parentOrgId) {
         const [parent] = await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.id, dto.parentOrgId));
         if (!parent) throw badRequest('parent_not_found', 'Parent organisation not found');
@@ -100,7 +99,7 @@ export class OrganizationsService {
         .insert(organizations)
         .values({
           id: newId(),
-          slug: dto.slug,
+          slug,
           name: dto.name,
           kinds: [...new Set(dto.kinds)],
           parentOrgId: dto.parentOrgId ?? null,
@@ -130,6 +129,23 @@ export class OrganizationsService {
       });
     }
     return toOrganization(pendingInvite.org);
+  }
+
+  /**
+   * An explicit slug must be free (409 otherwise); without one, a free slug is generated from the
+   * name. The advisory lock serialises generation so two sign-ups cannot pick the same slug.
+   */
+  private async resolveSlug(tx: IamTx, requested: string | undefined, name: string): Promise<string> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('iam.org_slugs'))`);
+    if (requested) {
+      const [taken] = await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, requested));
+      if (taken) throw conflict('slug_taken', 'That organisation address is already in use');
+      return requested;
+    }
+    return pickSlug(name, async (candidates) => {
+      const rows = await tx.select({ slug: organizations.slug }).from(organizations).where(inArray(organizations.slug, candidates));
+      return new Set(rows.map((r) => r.slug));
+    });
   }
 
   async list(query: { limit: number; cursor?: string; q?: string; kind?: string; status?: 'pending' | 'active' | 'suspended' }) {
