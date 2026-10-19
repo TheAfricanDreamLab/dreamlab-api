@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "declaration": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "paths": {
+      "@lib/auth": ["libs/auth/src"],
+      "@lib/common": ["libs/common/src"],
+      "@lib/config": ["libs/config/src"],
+      "@lib/database": ["libs/database/src"],
+      "@lib/health": ["libs/health/src"],
+      "@lib/logger": ["libs/logger/src"],
+      "@lib/messaging": ["libs/messaging/src"],
+      "@lib/testing": ["libs/testing/src"]
+    }
+  },
+  "include": ["apps/**/*.ts", "libs/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
