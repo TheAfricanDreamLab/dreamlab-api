@@ -28,9 +28,10 @@
       "@lib/health": ["libs/health/src"],
       "@lib/logger": ["libs/logger/src"],
       "@lib/messaging": ["libs/messaging/src"],
+      "@lib/rpc": ["libs/rpc/src"],
       "@lib/testing": ["libs/testing/src"]
     }
   },
-  "include": ["apps/**/*.ts", "libs/**/*.ts"],
+  "include": ["apps/**/*.ts", "libs/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

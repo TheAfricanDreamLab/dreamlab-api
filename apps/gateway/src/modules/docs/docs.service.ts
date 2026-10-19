@@ -36,7 +36,11 @@ export class DocsService implements OnModuleDestroy {
 
   async refresh(): Promise<OpenAPIObject> {
     if (!this.own) throw new Error('DocsService not started');
-    const upstreams = [{ name: 'iam', url: this.config.IAM_URL }];
+    const upstreams = [
+      { name: 'iam', url: this.config.IAM_URL },
+      { name: 'catalog', url: this.config.CATALOG_URL },
+      { name: 'learning', url: this.config.LEARNING_URL },
+    ];
     let merged: OpenAPIObject = structuredClone(this.own);
     for (const upstream of upstreams) {
       try {

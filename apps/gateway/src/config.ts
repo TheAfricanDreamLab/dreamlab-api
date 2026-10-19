@@ -11,6 +11,10 @@ export const gatewayConfigSchema = baseConfigSchema.extend({
   GATEWAY_PORT: z.coerce.number().int().positive().default(3000),
   IAM_URL: z.string().url(),
   IAM_JWKS_URL: z.string().url(),
+  /** Courses and programmes (/v1/catalog/*). */
+  CATALOG_URL: z.string().url(),
+  /** Enrolments and the course player (/v1/learning/*). */
+  LEARNING_URL: z.string().url(),
   /** Hosts that mean "no tenant". `<slug>.<base>` resolves to that organisation. */
   GATEWAY_BASE_DOMAINS: csv,
   /** Lets the X-Tenant header choose the tenant. Development and testing only. */

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { TokenResponse } from '@dreamlab/contracts';
 import { InjectConfig } from '@lib/config';
+import { forbidden } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { eq } from 'drizzle-orm';
 import type { RequestMeta } from '../../../common/interfaces/request-meta.interface';
@@ -49,6 +50,9 @@ export class SessionIssuer {
     meta: RequestMeta,
     options: { mfa?: boolean; orgId?: string | null } = {},
   ): Promise<TokenResponse> {
+    // Every sign-in path (password, codes, Google, SSO, MFA) ends here: suspended people get no session.
+    const [account] = await tx.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, user.id));
+    if (account?.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
     const context = await this.resolveContext(user.id, options.orgId !== undefined ? options.orgId : meta.tenantOrgId);
     const session = await this.sessions.create(tx, user.id, method, context, meta, options.mfa ?? false);
     return this.tokenResponse(session, context);

@@ -1,4 +1,4 @@
-import { safeEqual } from '@lib/common';
+import { safeEqual } from './ids';
 
 /**
  * Tenant headers are only believed when the request carries the gateway's shared secret; anything

@@ -17,7 +17,7 @@ import { iamConfigSchema } from '../src/config';
 import { IamDatabase, iamMigrationsFolder, schema } from '../src/database';
 import type { Notifier, OtpMessage } from '../src/modules/notifications/interfaces/notifier.interface';
 import { NOTIFIER } from '../src/modules/notifications/notifier.service';
-import { installGatewayTrust } from '../src/gateway-trust';
+import { installGatewayTrust } from '@lib/common';
 import { SeedService } from '../src/modules/seed/seed.service';
 
 /** Headers the gateway adds after resolving a tenant subdomain. */
@@ -111,11 +111,13 @@ beforeEach(async () => {
 });
 
 describe('contract parity', () => {
-  it('serves every route in @dreamlab/contracts, documented in OpenAPI', () => {
+  it('serves every IAM route in @dreamlab/contracts, documented in OpenAPI', () => {
     const doc = buildOpenApiDocument(app, { title: 't', description: 'd', version: '0' });
     const routes = (router: AppRouter): AppRoute[] =>
       Object.values(router).flatMap((v) => (isAppRoute(v) ? [v] : routes(v as AppRouter)));
-    const missing = [...routes(apiV1Contract), ...routes(wellKnownContract)]
+    // Catalog and learning routes are served by their own services (test/learning-journey.e2e-spec.ts).
+    const { catalog: _catalog, learning: _learning, ...iamRoutes } = apiV1Contract;
+    const missing = [...routes(iamRoutes as AppRouter), ...routes(wellKnownContract)]
       .map((r) => ({ method: r.method.toLowerCase(), path: r.path.replace(/:(\w+)/g, '{$1}') }))
       .filter((r) => !(doc.paths[r.path] as Record<string, unknown> | undefined)?.[r.method]);
     expect(missing).toEqual([]);

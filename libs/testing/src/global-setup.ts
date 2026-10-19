@@ -28,11 +28,17 @@ export default async function globalSetup(): Promise<void> {
   const slots = await redis.exec(['redis-cli', 'cluster', 'addslotsrange', '0', '16383']);
   if (slots.exitCode !== 0 || !slots.output.includes('OK')) throw new Error(`Redis cluster setup failed: ${slots.output}`);
 
-  const pg = (user: string) => `postgres://${user}:${user}@${postgres.getHost()}:${postgres.getPort()}/dreamlab_iam`;
+  const pg = (user: string, db = 'dreamlab_iam') => `postgres://${user}:${user}@${postgres.getHost()}:${postgres.getPort()}/${db}`;
   Object.assign(process.env, {
     IAM_DATABASE_URL: pg('iam_app'),
     IAM_SYSTEM_DATABASE_URL: pg('iam_system'),
     IAM_MIGRATION_DATABASE_URL: pg('iam_owner'),
+    CATALOG_DATABASE_URL: pg('catalog_app', 'dreamlab_catalog'),
+    CATALOG_SYSTEM_DATABASE_URL: pg('catalog_system', 'dreamlab_catalog'),
+    CATALOG_MIGRATION_DATABASE_URL: pg('catalog_owner', 'dreamlab_catalog'),
+    LEARNING_DATABASE_URL: pg('learning_app', 'dreamlab_learning'),
+    LEARNING_SYSTEM_DATABASE_URL: pg('learning_system', 'dreamlab_learning'),
+    LEARNING_MIGRATION_DATABASE_URL: pg('learning_owner', 'dreamlab_learning'),
     REDIS_URL: redis.getConnectionUrl(),
     RABBITMQ_URL: rabbit.getAmqpUrl(),
     // Every spec file boots IAM against the same database, so they must share the key that encrypts its signing keys.

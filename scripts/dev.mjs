@@ -3,6 +3,8 @@ import { spawn, spawnSync } from 'node:child_process';
 
 const services = [
   { name: 'iam', color: 36 },
+  { name: 'catalog', color: 33 },
+  { name: 'learning', color: 32 },
   { name: 'gateway', color: 35 },
 ];
 

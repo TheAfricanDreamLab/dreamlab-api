@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { DatabaseOptions, DatabaseService } from './database.service';
 
 export * from './database.service';
+export * from './columns';
 
 export const DATABASE = Symbol('DATABASE');
 export const InjectDatabase = (): ParameterDecorator & PropertyDecorator => Inject(DATABASE);
