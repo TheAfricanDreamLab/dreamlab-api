@@ -17,6 +17,8 @@ import { AuthzService } from '../authz/authz.service';
 import { MembershipLoader } from '../members/services/membership-loader.service';
 import type { Notifier } from '../notifications/interfaces/notifier.interface';
 import { NOTIFIER } from '../notifications/notifier.service';
+import { channelFor } from '../notifications/utils/channel-for';
+import { maskDestination } from '../notifications/utils/mask-destination';
 import { UsersRepository } from '../users/users.repository';
 
 type CreateInvitation = z.infer<typeof CreateInvitationSchema>;
@@ -166,6 +168,33 @@ export class InvitationsService {
   }
 
   /** The signed-in user's verified email or phone must match the invitation. */
+  /** What the invitee sees before signing in. Anyone holding the token may look; nothing changes. */
+  async preview(token: string) {
+    const [row] = await this.db.sys
+      .select({ inv: invitations, org: organizations, inviter: users.fullName })
+      .from(invitations)
+      .innerJoin(organizations, eq(organizations.id, invitations.orgId))
+      .leftJoin(users, eq(users.id, invitations.invitedByUserId))
+      .where(eq(invitations.tokenHash, sha256(token)));
+    if (!row || row.inv.status === 'revoked') throw notFound('invitation_not_found', 'This invitation link is not valid');
+    const roleRows = await this.db.sys
+      .select({ key: roles.key, name: roles.name, permissions: roles.permissions })
+      .from(roles)
+      .where(and(inArray(roles.key, row.inv.roleKeys), or(isNull(roles.orgId), eq(roles.orgId, row.inv.orgId))));
+    const destination = (row.inv.email ?? row.inv.phone)!;
+    const channel = channelFor(destination);
+    const view = toInvitation(row.inv);
+    return {
+      organization: { name: row.org.name, slug: row.org.slug, kinds: row.org.kinds as never, status: row.org.status },
+      roles: roleRows.map((r) => ({ key: r.key, name: r.name, permissions: r.permissions as never })),
+      invitedBy: row.inviter ?? null,
+      channel,
+      destination: maskDestination(channel, destination),
+      status: view.status,
+      expiresAt: view.expiresAt,
+    };
+  }
+
   async accept(principal: Principal, token: string, meta: RequestMeta): Promise<Membership> {
     const user = await this.users.findById(principal.userId);
     if (!user) throw notFound('user_not_found', 'User not found');

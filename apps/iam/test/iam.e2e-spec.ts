@@ -418,3 +418,23 @@ describe('organisation slugs', () => {
     expect(explicit.body).toMatchObject({ code: 'slug_taken' });
   });
 });
+
+describe('invitation preview', () => {
+  it('shows what the invitee is joining without signing in, and hides the full address', async () => {
+    const owner = await signUp('preview-owner@example.com');
+    const org = ((await request(app, 'POST', '/v1/orgs/signup', { token: owner.accessToken, body: { name: 'Preview Labs', kind: 'enterprise' } })).body as { id: string }).id;
+    const token = ((await request(app, 'POST', '/v1/auth/switch-org', { token: owner.accessToken, body: { orgId: org } })).body as { accessToken: string }).accessToken;
+    await request(app, 'POST', `/v1/orgs/${org}/invitations`, { token, body: { email: 'joiner@example.com', roleKeys: ['analyst'] } });
+    const preview = await request(app, 'POST', '/v1/invitations/preview', { body: { token: notifier.lastInviteToken('joiner@example.com') } });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      organization: { name: 'Preview Labs', slug: 'preview-labs' },
+      roles: [{ key: 'analyst', name: 'Analyst' }],
+      invitedBy: 'Test User',
+      channel: 'email',
+      destination: 'j***@example.com',
+      status: 'pending',
+    });
+    expect((await request(app, 'POST', '/v1/invitations/preview', { body: { token: 'x'.repeat(43) } })).status).toBe(404);
+  });
+});
