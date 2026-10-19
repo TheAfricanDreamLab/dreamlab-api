@@ -4,7 +4,8 @@ import { Test } from '@nestjs/testing';
 import { isAppRoute, type AppRoute, type AppRouter } from '@ts-rest/core';
 import { apiV1Contract, wellKnownContract } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE, RpcAuthzChecker } from '@lib/auth';
-import { buildOpenApiDocument, newId } from '@lib/common';
+import { buildOpenApiDocument, newId, REDIS, sha256 } from '@lib/common';
+import type Redis from 'ioredis';
 import { loadConfig } from '@lib/config';
 import { DATABASE, runMigrations } from '@lib/database';
 import { EventEnvelope, processOnce, RabbitConnection } from '@lib/messaging';
@@ -125,10 +126,21 @@ describe('authentication', () => {
     const tokens = await signUp('rotate@example.com');
     const first = await request(app, 'POST', '/v1/auth/refresh', { body: { refreshToken: tokens.refreshToken } });
     expect(first.status).toBe(200);
+    const newAccess = (first.body as { accessToken: string }).accessToken;
+
+    // A parallel request racing with the same token right away is benign: refused, session kept.
+    const race = await request(app, 'POST', '/v1/auth/refresh', { body: { refreshToken: tokens.refreshToken } });
+    expect(race.body).toMatchObject({ code: 'refresh_token_superseded' });
+    expect((await request(app, 'GET', '/v1/me', { token: newAccess })).status).toBe(200);
+
+    // The same token presented after the grace window means it leaked: the whole session ends.
+    const redis = app.get<Redis>(REDIS);
+    const usedKey = `iam:rt-used:${sha256(tokens.refreshToken)}`;
+    const used = JSON.parse((await redis.get(usedKey))!) as { sid: string; at: number };
+    await redis.set(usedKey, JSON.stringify({ ...used, at: used.at - 60_000 }), 'KEEPTTL');
     const reuse = await request(app, 'POST', '/v1/auth/refresh', { body: { refreshToken: tokens.refreshToken } });
     expect(reuse.body).toMatchObject({ code: 'refresh_token_reused' });
-    const after = await request(app, 'GET', '/v1/me', { token: (first.body as { accessToken: string }).accessToken });
-    expect(after.status).toBe(401);
+    expect((await request(app, 'GET', '/v1/me', { token: newAccess })).status).toBe(401);
   });
 
   it('locks an identifier after repeated failures', async () => {
