@@ -1,6 +1,6 @@
 # Dream Lab OS — Starter ERD v0.1
 
-Oct 19, 2026 · Ukeme Ikot · Draft for review. Mirrors the shared planning doc: https://claude.ai/code/artifact/2a4301a8-0b98-4c9a-8e18-da8f08138347
+Oct 19, 2026 · Ukeme Ikot · Draft for review. Living version: https://claude.ai/code/artifact/2a4301a8-0b98-4c9a-8e18-da8f08138347
 
 Dream Lab OS becomes a Coursera-style learning platform. It serves individual learners and five kinds of organisation, and it runs The African Dream Lab's 100-credit cohort programme as one program among many. This is starter ERD v0.1, for review before the tenancy schema slice (API-2) is written.
 
@@ -24,7 +24,7 @@ Seven rules shape every table below. The biggest change from Plan v1.1 is that a
 
 1. **One global person.** `users` is global. Everything a person does at an organisation goes through a `membership`, and roles are scoped assignments on it. The applicant → student → alumna → mentor journey keeps one person record (Plan §3.4, unchanged).
 2. **The organisation is the tenant.** `institutions` becomes `organizations`, with a profile per kind: institution, enterprise, partner, sponsor, platform. `institution_id` becomes `org_id` on every tenant-owned row.
-3. **Three kinds of ownership.** Content belongs to the org that wrote it. Learner records belong to the learner and carry a `context_org_id`: the org through which access was granted, and the one allowed to report on that record. Commercial records belong to the buyer.
+3. **Three kinds of ownership.** Content belongs to the org that wrote it. Learner records belong to the learner and carry a `context_org_id`: the org through which access was granted, and the one allowed to report on that record. It is empty when an individual learns on their own, and then no organisation can see the record. Commercial records belong to the buyer.
 4. **Access is a grant.** Every enrollment points at exactly one `access_grant`. The grant's source can be a purchase, subscription, seat, sponsorship, scholarship, free / audit access, or private org content. One check answers "may this person learn this?".
 5. **Published versions can't be changed.** Learners are pinned to the `course_version` they enrolled in. Editing a course creates a new draft version.
 6. **Records used as evidence are append-only.** This covers submissions, grades (a correction supersedes the old grade), stage transitions, competency events, learning events and audit logs. Credentials are revoked, never deleted.
@@ -34,31 +34,7 @@ Conventions: UUIDv7 primary keys, `created_at` / `updated_at` on every table, mo
 
 ## 3. Domain map
 
-```mermaid
-flowchart LR
-  ID["Identity and orgs<br/>users, organizations, units, groups, SSO, SCIM"]
-  CAT["Catalog and content<br/>courses → versions → modules → items"]
-  PRG["Programs and cohorts<br/>programs, phases, electives, cohorts, runs"]
-  COM["Commerce and access<br/>orders, contracts, seats, sponsorships → grants"]
-  ENR["Enrollment and progress<br/>enrollments, item progress, submissions, grades"]
-  ACA["Academy features<br/>admissions, capstone, Programme & Dream Score"]
-  ASG["Assigned learning<br/>assignments, audiences, recipients"]
-  CRD["Credentials and skills<br/>certificates, badges, skills taxonomy"]
-  REP["Reporting<br/>learning events, rollups, saved reports"]
-  ID -- own --> CAT
-  CAT -- compose --> PRG
-  ID -- buy access --> COM
-  COM -- grants --> ENR
-  CAT -- pinned version --> ENR
-  PRG -- switch on --> ACA
-  ENR -- feeds --> ACA
-  COM -- seats --> ASG
-  ASG -- enrolls --> ENR
-  ENR -- completion --> CRD
-  ENR -- events --> REP
-```
-
-Under every domain: audit logs · outbox · credSync tables · notifications · consent records.
+![Domain map](img/03-domain-map.png)
 
 Organisations own content and buy access, and the two meet at enrollment. Enrollment then feeds the academy scores, credentials and reporting. Sections 4–12 detail each box.
 
@@ -66,8 +42,14 @@ Organisations own content and buy access, and the two meet at enrollment. Enroll
 
 A person joins an organisation through a membership, and a membership gets roles at a scope. Enterprise structure (units, groups, SSO, SCIM) hangs off the organisation, so a company, a university and a funder all use the same tables.
 
+![Identity, organisations and enterprise directory ERD](img/04-identity.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 erDiagram
+  direction LR
   organizations ||--o{ organizations : "parent of"
   organizations ||--o| institution_profiles : "is institution"
   organizations ||--o| enterprise_profiles : "is enterprise"
@@ -175,6 +157,8 @@ erDiagram
   }
 ```
 
+</details>
+
 | Rule | Detail |
 | --- | --- |
 | Org kinds | Each kind is a 0..1 profile table, so a university can be an institution *and* a content partner. `organizations.parent_org_id` covers groups of companies and ministries with agencies |
@@ -185,9 +169,16 @@ erDiagram
 | Provisioning | SCIM writes `memberships` (with `external_id`), `org_units` and `group_members`. Deprovisioning sets the membership to `left` and frees its seat; learning records stay with the user |
 | Sign-in | A verified `org_domains` row plus `sso_connections.enforced` sends that domain's users to the org's IdP. `join_policy` controls self-join for B2C users from that domain |
 
+**Individuals need no organisation.** Anyone can sign up with email or phone plus OTP and get just a `users` row. With no membership at all, they can browse the public catalog, audit free courses, buy courses and subscribe. Memberships exist only for learning that an organisation provides or manages. The same person can later join an employer or institution without creating a new account.
+
 ## 5. Catalog and content
 
 A course belongs to the org that wrote it. Its content lives in versions that can't be changed once published: Course → Version → Module → Item. Where a course appears (public marketplace, an enterprise library, or private to its owner) is set by its visibility, catalog listings and collections, not by copying it.
+
+![Catalog and content ERD](img/05-catalog.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 erDiagram
@@ -288,6 +279,8 @@ erDiagram
   }
 ```
 
+</details>
+
 | Rule | Detail |
 | --- | --- |
 | Visibility | `public` = in the shared catalog. `org_private` = the owner org's members plus any org it licenses the course to. `unlisted` = reachable by link and grant only |
@@ -300,6 +293,11 @@ erDiagram
 ## 6. Programs and cohorts
 
 A program is an ordered set of courses with a type and a set of features you can switch on. The African Dream Lab is a `cohort_program` with every academy feature on. A Coursera-style specialization is a `self_paced` program with none of them. A cohort is one scheduled intake of a program, and it can be hosted by an org other than the program's owner.
+
+![Programs and cohorts ERD](img/06-programs.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 erDiagram
@@ -410,6 +408,8 @@ erDiagram
   }
 ```
 
+</details>
+
 | Program feature flag (`programs.features`) | Turns on | Dream Lab | Typical specialization |
 | --- | --- | --- | --- |
 | `admissions` | Ten-stage application pipeline, AI-assisted scoring | On | Off |
@@ -426,6 +426,11 @@ The Dream Lab seed (API-5) is now data in these tables: 4 phases weighted 25 / 2
 ## 7. Enrollment, progress and assessment
 
 Enrollment is the hub: every way into learning ends in a `program_enrollment` or `course_enrollment` backed by an `access_grant`. Progress and submissions attach to the course enrollment. A program enrollment ties its course enrollments together and becomes Dream Lab's credSync "enrollment" scope.
+
+![Enrollment, progress and assessment ERD](img/07-enrollment.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 erDiagram
@@ -514,9 +519,11 @@ erDiagram
   }
 ```
 
+</details>
+
 | Rule | Detail |
 | --- | --- |
-| `context_org_id` | The org this learning is happening *for*. Its admins can report on it: an employer for a seat, a funder for a sponsorship, an institution for its cohort, and the platform org for B2C |
+| `context_org_id` | The org this learning is happening *for*. Its admins can report on it: an employer for a seat, a funder for a sponsorship, an institution for its cohort, and empty (null) for an individual learning on their own |
 | Audit mode | `mode = audit` can view content but not submit graded items, and earns no credential. Upgrading swaps the access grant and keeps the progress |
 | One learner, many routes | A user can take the same course through an employer seat and later through B2C. These are separate enrollments with separate context orgs, so the employer never sees the personal one |
 | Submissions | Append-only. Every attempt is a new row, and a quiz attempt's answers go in `responses`. `client_command_id` links an offline credSync submission back to its command |
@@ -527,8 +534,14 @@ erDiagram
 
 Four routes pay for learning: B2C purchases, subscriptions, enterprise contracts with seat pools, and sponsorships. Each route ends in an `access_grant` row. The grant is the only thing enrollment checks, so adding a new payment route never touches the learning tables.
 
+![Commerce and access ERD](img/08-commerce.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 erDiagram
+  direction LR
   organizations ||--o{ offers : "sells"
   subscription_plans |o--o{ offers : "priced by"
   users |o--o{ orders : "buys"
@@ -639,10 +652,12 @@ erDiagram
   }
 ```
 
+</details>
+
 | Route | Path through the tables | Context org |
 | --- | --- | --- |
-| B2C one-off | `offers` → `orders` / `order_lines` → `payments` → `access_grants` (purchase) | Platform org |
-| B2C subscription | `subscription_plans` → `subscriptions` → `access_grants` (subscription, scope = plan's collection) | Platform org |
+| B2C one-off | `offers` → `orders` / `order_lines` → `payments` → `access_grants` (purchase) | None: personal learning |
+| B2C subscription | `subscription_plans` → `subscriptions` → `access_grants` (subscription, scope = plan's collection) | None: personal learning |
 | Enterprise | `contracts` → `license_pools` → `seat_assignments` → `access_grants` (seat) | The enterprise |
 | Sponsor / funder | `sponsorships` → `sponsored_learners` → `access_grants` (sponsorship) | The sponsor, read-only through `sponsor_viewer` |
 | Scholarship (Dream Lab) | `scholarship_awards` (§11) → `access_grants` (scholarship) + an `invoice` for the unfunded share | The institution |
@@ -654,8 +669,14 @@ Revoking a seat sets `revoked_at` on both the seat and its grant. The learner ke
 
 An admin assigns a course, program or collection to an audience: a unit, a group or named members. Each assignment is resolved into one recipient row per person, so that "who is overdue" is a simple query. Reporting reads an append-only `learning_events` stream and the rollups built from it, never the live tables.
 
+![Assigned learning and reporting ERD](img/09-assigned-learning.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 erDiagram
+  direction LR
   organizations ||--o{ learning_assignments : "issues"
   memberships ||--o{ learning_assignments : "assigned by"
   learning_assignments ||--o{ assignment_audiences : "targets"
@@ -715,6 +736,8 @@ erDiagram
   }
 ```
 
+</details>
+
 | Rule | Detail |
 | --- | --- |
 | Resolution | Recipients are recomputed when an assignment is created, when a group or unit membership changes (including through SCIM), and nightly. A person who leaves the audience keeps their row, marked `waived` |
@@ -726,6 +749,11 @@ erDiagram
 ## 10. Credentials and skills
 
 One `credential_templates` table covers all three kinds of credential: course certificates, program certificates and degrees, and skill badges. Each issued credential gets a public verification code. Courses, credentials and the Dream Score dimensions all point at one skills taxonomy, so enterprise skill reports and the academy's competency engine use the same language.
+
+![Credentials and skills ERD](img/10-credentials.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 erDiagram
@@ -799,6 +827,8 @@ erDiagram
   }
 ```
 
+</details>
+
 | Rule | Detail |
 | --- | --- |
 | Criteria | Course certificate: course passed in `full` mode. Program certificate or degree: all required courses passed, plus every `graduation_requirements` check when that feature is on. Skill badge: a passing score on a tagged assessment |
@@ -811,8 +841,14 @@ erDiagram
 
 Every table in Plan v1.1 §8 survives. They now hang off `cohorts` and `program_enrollments` instead of a single institution, so any program that turns a feature on can use them. Two groups are generalised: residency becomes a capstone, and graduation requirements become per-program data.
 
+![Academy features carried from Plan v1.1 ERD](img/11-academy.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 erDiagram
+  direction LR
   cohorts ||--o{ applications : "receives"
   users ||--o{ applications : "applies"
   applications ||--o{ application_evidence : "attaches"
@@ -843,6 +879,8 @@ erDiagram
   ventures ||--o{ impact_reports : "reports"
 ```
 
+</details>
+
 | Plan v1.1 group | Tables | Change in v0.1 |
 | --- | --- | --- |
 | Admissions | applications, application\_evidence, application\_reviews, ai\_evaluations, interviews, stage\_transitions | Applications attach to a cohort, not an institution. The ten-stage pipeline stays fixed. Admission creates the program enrollment |
@@ -869,7 +907,139 @@ These tables sit under every domain. Most are unchanged from Plan v1.1. Three ar
 | `data_subject_requests` | Export and deletion requests and their outcomes | New. A deletion anonymises learner records but keeps credentials verifiable |
 | `integrations` | Per-org connections: HRIS, LTI, SCORM import, webhooks, LRS export | New. Modelled now, built later |
 
-## 13. Open questions and effect on the build plan
+## 13. Instructors
+
+An instructor is a user with an `instructor_profile`. They teach either through an org affiliation (institution or partner staff) or as a vetted independent who publishes under the platform org. Course-level credits (author, lead, co-instructor) are kept separate from who teaches a given run or cohort, so content can be reused by other teaching teams. Orgs pay their own staff off-platform. Independents get their own payout account and revenue share.
+
+![Instructors ERD](img/13-instructors.png)
+
+<details>
+<summary>Mermaid source</summary>
+
+```mermaid
+erDiagram
+  direction LR
+  users ||--o| instructor_profiles : "teaches as"
+  users ||--o{ instructor_applications : "applies"
+  instructor_profiles ||--o{ instructor_affiliations : "affiliated with"
+  organizations ||--o{ instructor_affiliations : "employs / hosts"
+  memberships |o--o| instructor_affiliations : "backed by"
+  instructor_profiles ||--o{ course_instructors : "credited on"
+  courses ||--o{ course_instructors : "credits"
+  users ||--o{ teaching_assignments : "teaches"
+  course_runs |o--o{ teaching_assignments : "run"
+  cohorts |o--o{ teaching_assignments : "cohort"
+  users ||--o{ mentor_assignments : "mentors"
+  instructor_profiles |o--o| payout_accounts : "paid to"
+  course_instructors ||--o{ revenue_share_entries : "earns"
+  course_enrollments ||--o| course_reviews : "reviews"
+  course_reviews ||--o{ instructor_ratings : "rates"
+  instructor_profiles ||--o{ instructor_ratings : "rated"
+  courses ||--o{ course_questions : "asked about"
+  course_questions ||--o{ course_answers : "answered by"
+  users ||--o{ course_answers : "writes"
+  users ||--o{ class_sessions : "hosts office hours"
+
+  instructor_profiles {
+    uuid id PK
+    uuid user_id FK,UK
+    text public_slug UK
+    text display_name
+    text headline
+    text bio
+    uuid photo_asset_id FK
+    jsonb links
+    text status "pending|approved|suspended"
+    bool is_independent
+    timestamptz approved_at
+  }
+  instructor_applications {
+    uuid id PK
+    uuid user_id FK
+    jsonb expertise
+    uuid[] sample_asset_ids
+    text status "submitted|in_review|approved|rejected"
+    uuid reviewed_by FK
+    timestamptz decided_at
+  }
+  instructor_affiliations {
+    uuid id PK
+    uuid instructor_profile_id FK
+    uuid org_id FK
+    uuid membership_id FK
+    text kind "staff|faculty|independent"
+    text title
+    date starts_on
+    date ends_on
+  }
+  course_instructors {
+    uuid id PK
+    uuid course_id FK
+    uuid instructor_profile_id FK
+    uuid affiliation_id FK
+    text credit "author|lead_instructor|co_instructor"
+    int display_order
+    numeric revenue_share_pct
+  }
+  teaching_assignments {
+    uuid id PK
+    uuid user_id FK
+    uuid course_run_id FK
+    uuid cohort_id FK
+    text role "instructor|teaching_assistant|grader"
+    date starts_on
+    date ends_on
+  }
+  course_reviews {
+    uuid id PK
+    uuid course_enrollment_id FK,UK
+    uuid course_id FK
+    int rating "1-5"
+    text body
+    text status "published|hidden|flagged"
+  }
+  instructor_ratings {
+    uuid review_id FK
+    uuid instructor_profile_id FK
+    int rating "1-5"
+  }
+  course_questions {
+    uuid id PK
+    uuid course_id FK
+    uuid course_run_id FK
+    uuid content_item_id FK
+    uuid author_user_id FK
+    text title
+    text body
+    text status "open|answered|closed"
+  }
+  course_answers {
+    uuid id PK
+    uuid question_id FK
+    uuid user_id FK
+    text body
+    bool by_staff
+    bool accepted
+  }
+```
+
+</details>
+
+| Rule | Detail |
+| --- | --- |
+| Becoming an instructor | Org-affiliated: an org admin adds an affiliation for one of its members, and the profile is approved by that org. Independent: an `instructor_application` reviewed by the platform org. Approval creates a `kind = independent` affiliation to the platform org |
+| Who owns the course | Courses keep one owner org. Independent instructors' courses are owned by the platform org, with the instructor credited through `course_instructors` |
+| Credit vs. teaching | `course_instructors` is the public credit on the course page (author, lead, co-instructor, in display order). `teaching_assignments` says who teaches, assists or grades a specific run or cohort. Self-paced courses are answered by the credited instructors |
+| Permissions | Credits and teaching assignments each create the matching scoped `role_assignment` (author on the course, grader on the run). Authorization reads only `role_assignments` |
+| Mentors | `mentor_assignments` (§11) now cover enterprise coaches too: a mentor is assigned to a program enrollment or to a membership |
+| Payouts | `payout_accounts` belong to an org *or* an independent instructor. For independents' courses, each payment's split in `revenue_share_entries` follows `course_instructors.revenue_share_pct`. Affiliated instructors get nothing on-platform, because their org is paid |
+| Reviews and ratings | One review per course enrollment, with optional per-instructor ratings. Rating averages are rollups shown on the catalog and the public profile |
+| Q&A and office hours | Course Q&A threads can sit on a specific item. Staff answers are flagged. Office hours are `class_sessions` with `session_type = office_hours` and a `host_user_id`, so they use the same LiveKit rooms and recordings |
+| Instructor analytics | Read models over `learning_events` and `revenue_share_entries`, filtered to the courses an instructor is credited on: enrollments, completion, drop-off by item, ratings, earnings |
+
+Still open: can learners review before completing a course (working assumption: after finishing one module)? And if an independent instructor leaves, do they keep any rights to their courses (working assumption: the platform keeps the course and the instructor's credit stays)?
+
+## 14. Open questions and effect on the build plan
 
 Ten questions are still open. Each one has a working assumption that the model above already uses, so the ERD can move forward while they are settled.
 
@@ -879,7 +1049,7 @@ Ten questions are still open. Each one has a working assumption that the model a
 | 2 | Can a content partner see named enterprise learners' grades, or only aggregates? | Graders see the submissions they grade. Otherwise partners see aggregates only |
 | 3 | Does a learner move to a new course version mid-course? | No: they stay pinned and may opt in to switch |
 | 4 | Do programs need versions (curriculum changes between Cohort 04 and 05)? | Yes. Add `program_versions` in v0.2 |
-| 5 | Is the African Dream Network the platform org that owns the shared catalog and the B2C context? | Yes |
+| 5 | Is the African Dream Network the platform org that owns the shared catalog? Individual learners belong to no org either way | Yes |
 | 6 | Currencies and payment providers: NGN-only through Paystack, or USD through Stripe as well for international enterprises and sponsors? | NGN first, with the `provider` column ready for more |
 | 7 | Skills taxonomy: build our own, or adopt ESCO / O\*NET / Lightcast as the base? | Adopt ESCO as the base and allow org frameworks on top |
 | 8 | Must enterprises import SCORM / xAPI / LTI content in v1? | No. Modelled in `integrations`, built later |
