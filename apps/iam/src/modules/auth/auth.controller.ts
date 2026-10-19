@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { EmptyBodyDto } from './dto/empty-body.dto';
 import { GoogleSignInDto } from './dto/google-sign-in.dto';
 import { LoginDto, OtpLoginDto } from './dto/login.dto';
+import { SignInResponseDto } from './dto/mfa.dto';
 import { OtpAcceptedDto, OtpRequestDto, VerifyDto } from './dto/otp.dto';
 import { PasswordChangeDto, PasswordResetDto } from './dto/password.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -37,13 +38,13 @@ export class AuthController {
   @ApiOperation({ summary: r.requestOtp.summary })
   @ZodResponse({ status: 202, type: OtpAcceptedDto })
   requestOtp(@Body() dto: OtpRequestDto, @Meta() meta: RequestMeta) {
-    return this.auth.requestOtp(dto.identifier, dto.purpose, meta);
+    return this.auth.requestOtp(dto.identifier, dto.purpose, meta, dto.channel);
   }
 
   @Post('verify')
   @Public()
   @ApiOperation({ summary: r.verify.summary })
-  @ZodResponse({ status: 200, type: TokenResponseDto })
+  @ZodResponse({ status: 200, type: SignInResponseDto })
   verify(@Body() dto: VerifyDto, @Meta() meta: RequestMeta) {
     return this.auth.verify(dto.identifier, dto.code, meta);
   }
@@ -51,7 +52,7 @@ export class AuthController {
   @Post('login')
   @Public()
   @ApiOperation({ summary: r.login.summary })
-  @ZodResponse({ status: 200, type: TokenResponseDto })
+  @ZodResponse({ status: 200, type: SignInResponseDto })
   login(@Body() dto: LoginDto, @Meta() meta: RequestMeta) {
     return this.auth.login(dto.identifier, dto.password, meta);
   }
@@ -59,7 +60,7 @@ export class AuthController {
   @Post('google')
   @Public()
   @ApiOperation({ summary: r.google.summary })
-  @ZodResponse({ status: 200, type: TokenResponseDto })
+  @ZodResponse({ status: 200, type: SignInResponseDto })
   google(@Body() dto: GoogleSignInDto, @Meta() meta: RequestMeta) {
     return this.auth.googleSignIn(dto, meta);
   }
@@ -67,7 +68,7 @@ export class AuthController {
   @Post('login/otp')
   @Public()
   @ApiOperation({ summary: r.loginWithOtp.summary })
-  @ZodResponse({ status: 200, type: TokenResponseDto })
+  @ZodResponse({ status: 200, type: SignInResponseDto })
   loginWithOtp(@Body() dto: OtpLoginDto, @Meta() meta: RequestMeta) {
     return this.auth.loginWithOtp(dto.identifier, dto.code, meta);
   }

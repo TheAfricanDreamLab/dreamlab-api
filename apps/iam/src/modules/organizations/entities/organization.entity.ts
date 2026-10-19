@@ -1,4 +1,4 @@
-import { AnyPgColumn, index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { AnyPgColumn, boolean, index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { timestamps } from '../../../database/columns';
 
 /** The tenant. Kinds are capabilities; each kind has a 0..1 profile row. */
@@ -14,6 +14,8 @@ export const organizations = pgTable(
     branding: jsonb('branding').$type<Record<string, unknown>>().notNull().default({}),
     terminology: jsonb('terminology').$type<Record<string, string>>().notNull().default({}),
     dataRegion: text('data_region').notNull().default('ng'),
+    /** Admin permissions need a session that passed MFA (IAM-19). */
+    requireAdminMfa: boolean('require_admin_mfa').notNull().default(false),
     ...timestamps,
   },
   (t) => [uniqueIndex('organizations_slug_key').on(t.slug), index('organizations_kinds_idx').using('gin', t.kinds)],

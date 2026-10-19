@@ -175,4 +175,13 @@ export class AuthzService {
   static effectivePermissions(principal: Principal): Permission[] {
     return [...orgPermissions(principal)].sort();
   }
+
+  /** Like effectivePermissions, but read from the database, so custom roles (IAM-18) count too. */
+  async orgWidePermissions(principal: Principal): Promise<Permission[]> {
+    if (principal.platformAdmin || !principal.orgId) return AuthzService.effectivePermissions(principal);
+    const access = await this.orgAccess(principal.userId, principal.orgId);
+    const perms = new Set<Permission>();
+    for (const g of access?.grants ?? []) if (g.scopeType === 'org') for (const p of g.permissions) perms.add(p);
+    return [...perms].sort();
+  }
 }

@@ -18,6 +18,8 @@ const principal = (roles: string[], overrides: Partial<Principal> = {}): Princip
   platformAdmin: false,
   authzVersion: 1,
   tokenId: 'jti',
+  amr: ['pwd'],
+  mfaRequired: false,
   expiresAt: 0,
   ...overrides,
 });
@@ -128,5 +130,43 @@ describe('PermissionsGuard', () => {
     await expect(
       guardWith({ permission: 'org.members.remove' }).canActivate(contextFor(principal([], { platformAdmin: true, orgId: null }), { orgId: OTHER_ORG })),
     ).resolves.toBe(true);
+  });
+});
+
+describe('MFA for admin permissions', () => {
+  it('needs a second factor for admin permissions when the context requires it', () => {
+    const { needsMfa } = jest.requireActual('./principal') as typeof import('./principal');
+    expect(needsMfa({ amr: ['pwd'], mfaRequired: true }, 'org.members.invite')).toBe(true);
+    expect(needsMfa({ amr: ['pwd', 'mfa'], mfaRequired: true }, 'org.members.invite')).toBe(false);
+    expect(needsMfa({ amr: ['pwd'], mfaRequired: true }, 'org.read')).toBe(false);
+    expect(needsMfa({ amr: ['pwd'], mfaRequired: false }, 'org.security.manage')).toBe(false);
+  });
+
+  it('the guard refuses an admin without MFA before checking roles, even a platform admin', async () => {
+    const reflector = { getAllAndOverride: () => ({ permission: 'org.members.invite' }) } as unknown as Reflector;
+    const guard = new PermissionsGuard(reflector);
+    const p = principal(['org_admin'], { platformAdmin: true, mfaRequired: true, amr: ['pwd'] });
+    const ctx = {
+      getType: () => 'http',
+      getHandler: () => null,
+      getClass: () => null,
+      switchToHttp: () => ({ getRequest: () => ({ principal: p, params: { orgId: ORG } }) }),
+    } as unknown as ExecutionContext;
+    await expect(guard.canActivate(ctx)).rejects.toMatchObject({ code: 'mfa_required' });
+  });
+
+  it('asks IAM about custom roles, whose permissions are not in the token', async () => {
+    const reflector = { getAllAndOverride: () => ({ permission: 'org.members.read' }) } as unknown as Reflector;
+    const asked: string[] = [];
+    const checker: AuthzChecker = { check: async (r) => (asked.push(r.permission), true) };
+    const guard = new PermissionsGuard(reflector, checker);
+    const ctx = {
+      getType: () => 'http',
+      getHandler: () => null,
+      getClass: () => null,
+      switchToHttp: () => ({ getRequest: () => ({ principal: principal(['regional_lead']), params: { orgId: ORG } }) }),
+    } as unknown as ExecutionContext;
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(asked).toEqual(['org.members.read']);
   });
 });

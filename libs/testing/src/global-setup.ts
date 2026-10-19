@@ -6,6 +6,7 @@
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { RabbitMQContainer } from '@testcontainers/rabbitmq';
 import { RedisContainer } from '@testcontainers/redis';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
 export default async function globalSetup(): Promise<void> {
@@ -29,6 +30,8 @@ export default async function globalSetup(): Promise<void> {
     IAM_MIGRATION_DATABASE_URL: pg('iam_owner'),
     REDIS_URL: redis.getConnectionUrl(),
     RABBITMQ_URL: rabbit.getAmqpUrl(),
+    // Every spec file boots IAM against the same database, so they must share the key that encrypts its signing keys.
+    E2E_KEY_ENCRYPTION_SECRET: randomBytes(32).toString('base64'),
   });
   (globalThis as Record<string, unknown>).__E2E_CONTAINERS__ = [postgres, redis, rabbit];
 }

@@ -13,6 +13,7 @@ import type { IamConfig } from './config';
 import { IamDatabase, schema } from './database';
 import { AuthenticationModule } from './modules/auth/auth.module';
 import { AuthzModule } from './modules/authz/authz.module';
+import { DomainsModule } from './modules/domains/domains.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { KeysModule } from './modules/keys/keys.module';
 import { SigningKeysService } from './modules/keys/signing-keys.service';
@@ -21,7 +22,9 @@ import { MembersModule } from './modules/members/members.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OrgStructureModule } from './modules/org-structure/org-structure.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { ScimModule } from './modules/scim/scim.module';
 import { SeedModule } from './modules/seed/seed.module';
+import { SsoModule } from './modules/sso/sso.module';
 
 /** Infrastructure shared by the HTTP app and the CLI. */
 export function iamInfrastructure(config: IamConfig) {
@@ -58,6 +61,9 @@ export class IamAppModule {
         MembersModule,
         InvitationsModule,
         OrgStructureModule,
+        DomainsModule,
+        SsoModule,
+        ScimModule,
         SeedModule,
         HealthModule.forRoot({
           inject: [DATABASE, REDIS, RABBIT],

@@ -54,6 +54,26 @@ export const iamConfigSchema = baseConfigSchema.extend({
     .optional()
     .transform((v) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean)),
   PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
+  /** The gateway's public address: SCIM base URL and SAML metadata links. */
+  PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
+
+  /** Platform admins need an authenticator app for platform-wide actions (IAM-19). */
+  PLATFORM_ADMIN_MFA_REQUIRED: booleanString.default('false'),
+  /**
+   * Allow identity-provider URLs on private networks and plain http (development only). In
+   * production, IdP URLs must be https and resolve to public addresses.
+   */
+  SSO_ALLOW_PRIVATE_URLS: booleanString.default('false'),
+  /** dns: domains verify through a TXT record. trust: any domain verifies (development only). */
+  DOMAIN_VERIFY_MODE: z.enum(['dns', 'trust']).default('dns'),
+
+  /** SMS and WhatsApp codes (IAM-20): Termii when TERMII_API_KEY is set, otherwise logged in development. */
+  SMS_PROVIDER: z.enum(['termii', 'console']).optional(),
+  TERMII_API_KEY: z.string().min(10).optional(),
+  TERMII_SENDER_ID: z.string().min(3).max(11).default('DreamLab'),
+  TERMII_API_URL: z.string().url().default('https://api.ng.termii.com/api/sms/send'),
+  /** generic or dnd (numbers on the do-not-disturb list need dnd). */
+  TERMII_SMS_CHANNEL: z.enum(['generic', 'dnd']).default('dnd'),
 });
 
 export type IamConfig = z.infer<typeof iamConfigSchema>;
@@ -65,7 +85,14 @@ export const iamProductionSchema = iamConfigSchema.superRefine((c, ctx) => {
   if (c.BOOTSTRAP_ADMIN_PASSWORD && c.BOOTSTRAP_ADMIN_PASSWORD.length < 16) ctx.addIssue({ code: 'custom', path: ['BOOTSTRAP_ADMIN_PASSWORD'], message: 'at least 16 characters in production' });
   if (c.SEED_DEMO_ORGS) ctx.addIssue({ code: 'custom', path: ['SEED_DEMO_ORGS'], message: 'demo organisations are for development only' });
   if (!c.AUTH_ISSUER.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['AUTH_ISSUER'], message: 'must be an https URL in production' });
+  if (c.DOMAIN_VERIFY_MODE === 'trust') ctx.addIssue({ code: 'custom', path: ['DOMAIN_VERIFY_MODE'], message: 'trust is for development only' });
+  if (c.SSO_ALLOW_PRIVATE_URLS) ctx.addIssue({ code: 'custom', path: ['SSO_ALLOW_PRIVATE_URLS'], message: 'is for development only' });
 });
+
+export function smsProvider(config: Pick<IamConfig, 'SMS_PROVIDER' | 'TERMII_API_KEY'>): 'termii' | 'console' {
+  if (config.SMS_PROVIDER) return config.SMS_PROVIDER;
+  return config.TERMII_API_KEY ? 'termii' : 'console';
+}
 
 export function emailProvider(config: Pick<IamConfig, 'EMAIL_PROVIDER' | 'RESEND_API_KEY' | 'ZEPTOMAIL_TOKEN'>): 'resend' | 'zeptomail' | 'console' {
   if (config.EMAIL_PROVIDER) return config.EMAIL_PROVIDER;

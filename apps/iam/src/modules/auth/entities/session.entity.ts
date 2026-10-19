@@ -12,7 +12,9 @@ export const sessions = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     activeOrgId: uuid('active_org_id'),
     activeMembershipId: uuid('active_membership_id'),
-    authMethod: text('auth_method', { enum: ['password', 'otp', 'verify', 'sso'] }).notNull(),
+    authMethod: text('auth_method', { enum: ['password', 'otp', 'verify', 'sso', 'google'] }).notNull(),
+    /** When this session passed a second factor (authenticator app, or the organisation's sign-on). */
+    mfaAt: timestamp('mfa_at', { withTimezone: true }),
     userAgent: text('user_agent'),
     ip: text('ip'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

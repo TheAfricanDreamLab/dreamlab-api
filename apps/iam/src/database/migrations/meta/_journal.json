@@ -15,6 +15,13 @@
       "when": 1792403663443,
       "tag": "0001_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792420533318,
+      "tag": "0002_enterprise_identity",
+      "breakpoints": true
     }
   ]
 }

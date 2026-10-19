@@ -37,8 +37,12 @@ export class OtpService {
   }
 
   /** Create and send a code. Throws 429 inside the cooldown or over the hourly limit. */
-  async issue(purpose: OtpPurpose, identifier: string): Promise<{ channel: 'email' | 'sms'; destination: string; expiresInSeconds: number }> {
-    const channel = channelFor(identifier);
+  async issue(
+    purpose: OtpPurpose,
+    identifier: string,
+    phoneChannel: 'sms' | 'whatsapp' = 'sms',
+  ): Promise<{ channel: 'email' | 'sms' | 'whatsapp'; destination: string; expiresInSeconds: number }> {
+    const channel = channelFor(identifier) === 'email' ? 'email' : phoneChannel;
     const idHash = sha256(identifier);
     const cooldown = this.config.OTP_RESEND_COOLDOWN_SECONDS;
     if (cooldown > 0) {
@@ -59,7 +63,7 @@ export class OtpService {
       .del(`${key}:attempts`)
       .exec();
     await this.notifier.sendOtp({ channel, destination: identifier, code, purpose, expiresInSeconds: this.config.OTP_TTL_SECONDS });
-    return { channel, destination: maskDestination(channel, identifier), expiresInSeconds: this.config.OTP_TTL_SECONDS };
+    return { channel, destination: maskDestination(channel === 'email' ? 'email' : 'sms', identifier), expiresInSeconds: this.config.OTP_TTL_SECONDS };
   }
 
   /** Check a code. A correct code is consumed; every attempt counts towards the cap (atomically). */

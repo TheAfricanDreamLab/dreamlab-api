@@ -15,6 +15,8 @@ export interface AccessTokenInput {
   roles: string[];
   platformAdmin: boolean;
   authzVersion: number;
+  amr: string[];
+  mfaRequired: boolean;
 }
 
 interface RefreshRecord {
@@ -65,6 +67,8 @@ export class TokenService {
       roles: input.roles,
       pla: input.platformAdmin,
       azv: input.authzVersion,
+      amr: input.amr,
+      mfr: input.mfaRequired,
     };
     return new SignJWT(claims)
       .setProtectedHeader({ alg: 'EdDSA', kid, typ: 'at+jwt' })

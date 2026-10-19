@@ -102,6 +102,13 @@ afterAll(async () => {
   await app?.close();
 });
 
+// Spec files share Redis and sign people up from the same address; start each test with fresh rate limits.
+beforeEach(async () => {
+  const redis = app.get<Redis>(REDIS);
+  const keys = await redis.keys('iam:rl:*');
+  if (keys.length > 0) await redis.del(...keys);
+});
+
 describe('contract parity', () => {
   it('serves every route in @dreamlab/contracts, documented in OpenAPI', () => {
     const doc = buildOpenApiDocument(app, { title: 't', description: 'd', version: '0' });
