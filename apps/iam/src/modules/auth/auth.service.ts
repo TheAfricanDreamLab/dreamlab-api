@@ -3,6 +3,7 @@ import type {
   GoogleSignInRequestSchema,
   OtpPurpose,
   RegisterRequest,
+  SignInResponse,
   TokenResponse,
 } from '@dreamlab/contracts';
 import { and, eq } from 'drizzle-orm';
@@ -32,17 +33,12 @@ import { AuthzService } from '../authz/authz.service';
 import { OtpService, OtpVerification } from '../otp/otp.service';
 import { isEmail, UserRow, UsersRepository } from '../users/users.repository';
 import { GoogleIdentityService } from './services/google-identity.service';
+import { MfaService } from './services/mfa.service';
 import { PasswordService } from './services/password.service';
+import { PERSONAL, SessionIssuer, TokenContext } from './services/session-issuer.service';
 import { SessionRow, SessionsService } from './services/sessions.service';
+import { SsoPolicy } from './services/sso-policy.service';
 import { TokenService } from './services/token.service';
-
-interface TokenContext {
-  orgId: string | null;
-  membershipId: string | null;
-  roles: string[];
-}
-
-const PERSONAL: TokenContext = { orgId: null, membershipId: null, roles: [] };
 
 @Injectable()
 export class AuthService {
@@ -57,8 +53,11 @@ export class AuthService {
     private readonly users: UsersRepository,
     private readonly passwords: PasswordService,
     private readonly otp: OtpService,
-    private readonly tokens: TokenService,
     private readonly sessions: SessionsService,
+    private readonly tokens: TokenService,
+    private readonly issuer: SessionIssuer,
+    private readonly mfa: MfaService,
+    private readonly ssoPolicy: SsoPolicy,
     private readonly authz: AuthzService,
     private readonly google: GoogleIdentityService,
   ) {
@@ -74,6 +73,7 @@ export class AuthService {
   async register(dto: RegisterRequest, meta: RequestMeta) {
     const identifier = (dto.email ?? dto.phone)!;
     await this.ipLimit('register', meta, 20, 3600);
+    await this.ssoPolicy.assertNotEnforced(identifier);
     const passwordHash = await this.passwords.hash(dto.password);
 
     const user = await this.db.system(async (tx) => {
@@ -101,8 +101,10 @@ export class AuthService {
   }
 
   /** Always answers the same way, so it cannot be used to discover accounts. */
-  async requestOtp(identifier: string, purpose: OtpPurpose, meta: RequestMeta) {
+  async requestOtp(identifier: string, purpose: OtpPurpose, meta: RequestMeta, channel?: 'sms' | 'whatsapp') {
     await this.ipLimit('otp', meta, 30, 3600);
+    // Domain policy is public (it depends on the address, not on whether an account exists).
+    if (purpose === 'login') await this.ssoPolicy.assertNotEnforced(identifier);
     const user = await this.users.findByIdentifier(identifier);
     const eligible =
       user !== null &&
@@ -110,7 +112,7 @@ export class AuthService {
       (purpose === 'verify' ? !UsersRepository.isVerified(user, identifier) : true);
     if (eligible) {
       try {
-        await this.otp.issue(purpose, identifier);
+        await this.otp.issue(purpose, identifier, channel);
       } catch (err) {
         // Do not reveal rate limits on an identifier the caller may not own.
         this.logger.warn(`OTP not issued: ${err instanceof Error ? err.message : String(err)}`);
@@ -119,7 +121,7 @@ export class AuthService {
     return { accepted: true as const, expiresInSeconds: this.config.OTP_TTL_SECONDS };
   }
 
-  async verify(identifier: string, code: string, meta: RequestMeta): Promise<TokenResponse> {
+  async verify(identifier: string, code: string, meta: RequestMeta): Promise<SignInResponse> {
     const user = await this.users.findByIdentifier(identifier);
     if (!user) throw badRequest('otp_invalid', 'The code is invalid or has expired');
     this.assertOtp(await this.otp.verify('verify', identifier, code));
@@ -132,13 +134,13 @@ export class AuthService {
         requestId: meta.requestId,
         payload: { userId: user.id, channel: isEmail(identifier) ? 'email' : 'sms' },
       });
-      return this.startSession(tx, user, 'verify', meta);
+      return this.signIn(tx, user, 'verify', meta);
     });
   }
 
   // ---------- sign-in ----------
 
-  async login(identifier: string, password: string, meta: RequestMeta): Promise<TokenResponse> {
+  async login(identifier: string, password: string, meta: RequestMeta): Promise<SignInResponse> {
     await this.ipLimit('login', meta, this.config.LOGIN_IP_LIMIT_PER_15M, 900);
     const idKey = sha256(identifier);
     const lockTtl = await this.redis.ttl(`iam:lock:${idKey}`);
@@ -153,62 +155,62 @@ export class AuthService {
     }
     await this.limiter.reset(`login-fail:${idKey}`);
     this.assertActive(user);
+    // Only after the password is proven, so the policy check cannot be used to probe accounts.
+    await this.ssoPolicy.assertNotEnforced(identifier, await this.authz.isPlatformAdmin(user.id));
     if (!UsersRepository.isVerified(user, identifier)) {
       throw forbidden('account_unverified', 'Verify your email or phone first: request a code with purpose "verify"');
     }
-    return this.db.system((tx) => this.startSession(tx, user, 'password', meta));
+    return this.db.system((tx) => this.signIn(tx, user, 'password', meta));
   }
 
-  async loginWithOtp(identifier: string, code: string, meta: RequestMeta): Promise<TokenResponse> {
+  async loginWithOtp(identifier: string, code: string, meta: RequestMeta): Promise<SignInResponse> {
     await this.ipLimit('login', meta, this.config.LOGIN_IP_LIMIT_PER_15M, 900);
     const user = await this.users.findByIdentifier(identifier);
     if (!user) throw badRequest('otp_invalid', 'The code is invalid or has expired');
     this.assertOtp(await this.otp.verify('login', identifier, code));
     this.assertActive(user);
+    await this.ssoPolicy.assertNotEnforced(identifier, await this.authz.isPlatformAdmin(user.id));
     return this.db.system(async (tx) => {
       // Receiving the code proves control of the identifier.
       if (!UsersRepository.isVerified(user, identifier)) await this.users.markVerified(tx, user.id, identifier);
-      return this.startSession(tx, user, 'otp', meta);
+      return this.signIn(tx, user, 'otp', meta);
     });
   }
 
-  async refresh(refreshToken: string, meta: RequestMeta): Promise<TokenResponse> {
-    const outcome = await this.tokens.consumeRefreshToken(refreshToken);
-    if (outcome.kind === 'superseded') {
-      throw unauthorized('refresh_token_superseded', 'This refresh token was just rotated by another request; use the newer one');
-    }
-    if (outcome.kind === 'reused') {
-      await this.sessions.revoke({ sessionId: outcome.sessionId }, 'refresh_token_reuse', null, meta.requestId);
-      throw unauthorized('refresh_token_reused', 'This sign-in was ended for your safety. Please sign in again.');
-    }
-    if (outcome.kind === 'invalid') throw unauthorized('refresh_token_invalid', 'Refresh token is invalid or expired');
+  async verifyMfa(mfaToken: string, code: string, meta: RequestMeta): Promise<TokenResponse> {
+    await this.ipLimit('login', meta, this.config.LOGIN_IP_LIMIT_PER_15M, 900);
+    return this.mfa.verifyChallenge(mfaToken, code, meta);
+  }
 
+  async refresh(refreshToken: string, meta: RequestMeta): Promise<TokenResponse> {
+    void meta;
+    const outcome = await this.consumeRefreshToken(refreshToken);
     const session = await this.sessions.findUsable(outcome.sessionId);
     const user = session ? await this.users.findById(session.userId) : null;
     if (!session || !user || session.userId !== outcome.userId) {
       throw unauthorized('refresh_token_invalid', 'Refresh token is invalid or expired');
     }
     this.assertActive(user);
-    const context = await this.resolveContext(user.id, session.activeOrgId);
+    const context = await this.issuer.resolveContext(user.id, session.activeOrgId);
     return this.db.system(async (tx) => {
       await this.sessions.touch(tx, session.id, { activeOrgId: context.orgId, activeMembershipId: context.membershipId });
-      return this.tokenResponse(session.id, user.id, context);
+      return this.issuer.tokenResponse(session, context);
     });
   }
 
   async switchOrg(principal: Principal, orgId: string | null, meta: RequestMeta): Promise<TokenResponse> {
+    void meta;
     const session = await this.sessions.findUsable(principal.sessionId);
     if (!session) throw unauthorized('session_ended', 'Session has ended');
-    let context = PERSONAL;
+    let context: TokenContext = PERSONAL;
     if (orgId) {
       const access = await this.authz.orgAccess(principal.userId, orgId);
       if (!access) throw forbidden('not_a_member', 'You are not an active member of that organisation');
       context = { orgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access) };
     }
-    void meta;
     return this.db.system(async (tx) => {
       await this.sessions.touch(tx, session.id, { activeOrgId: context.orgId, activeMembershipId: context.membershipId });
-      return this.tokenResponse(session.id, principal.userId, context);
+      return this.issuer.tokenResponse(session, context);
     });
   }
 
@@ -217,10 +219,12 @@ export class AuthService {
    * email. Google has verified the email, so a matching account is linked. If that account was
    * never verified, someone else may have set its password, so the password is removed.
    */
-  async googleSignIn(dto: z.infer<typeof GoogleSignInRequestSchema>, meta: RequestMeta): Promise<TokenResponse> {
+  async googleSignIn(dto: z.infer<typeof GoogleSignInRequestSchema>, meta: RequestMeta): Promise<SignInResponse> {
     await this.ipLimit('login', meta, this.config.LOGIN_IP_LIMIT_PER_15M, 900);
     const google = await this.google.verify(dto.idToken);
     const { userIdentities } = schema;
+    const existing = await this.users.findByIdentifier(google.email);
+    await this.ssoPolicy.assertNotEnforced(google.email, existing ? await this.authz.isPlatformAdmin(existing.id) : false);
     return this.db.system(async (tx) => {
       const [linked] = await tx
         .select({ userId: userIdentities.userId })
@@ -254,7 +258,7 @@ export class AuthService {
         .values({ id: newId(), userId: user.id, provider: 'google', subject: google.subject, lastUsedAt: new Date() })
         .onConflictDoUpdate({ target: [userIdentities.provider, userIdentities.subject], set: { lastUsedAt: new Date() } });
       this.assertActive(user);
-      return this.startSession(tx, user, 'sso', meta);
+      return this.signIn(tx, user, 'google', meta);
     });
   }
 
@@ -330,44 +334,27 @@ export class AuthService {
 
   // ---------- helpers ----------
 
-  /** Start a session in the tenant the request came through, if the user belongs to it. */
-  private async startSession(tx: IamTx, user: UserRow, method: SessionRow['authMethod'], meta: RequestMeta): Promise<TokenResponse> {
-    const context = await this.resolveContext(user.id, meta.tenantOrgId);
-    const session = await this.sessions.create(tx, user.id, method, context, meta);
-    return this.tokenResponse(session.id, user.id, context);
+  /** The first factor passed. Accounts with an authenticator app get a challenge; others a session. */
+  private async signIn(tx: IamTx, user: UserRow, method: SessionRow['authMethod'], meta: RequestMeta): Promise<SignInResponse> {
+    if (MfaService.enabled(user)) return this.mfa.challenge(user, method, meta);
+    return this.issuer.start(tx, user, method, meta);
   }
 
-  private async resolveContext(userId: string, preferredOrgId: string | null): Promise<TokenContext> {
-    if (!preferredOrgId) return PERSONAL;
-    const access = await this.authz.orgAccess(userId, preferredOrgId);
-    return access ? { orgId: preferredOrgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access) } : PERSONAL;
-  }
-
-  private async tokenResponse(sessionId: string, userId: string, context: TokenContext): Promise<TokenResponse> {
-    const [platformAdmin, authzVersion] = await Promise.all([this.authz.isPlatformAdmin(userId), this.authz.authzVersion(userId)]);
-    const accessToken = await this.tokens.signAccessToken({ userId, sessionId, ...context, platformAdmin, authzVersion });
-    const refreshToken = await this.tokens.issueRefreshToken(sessionId, userId);
-    return {
-      tokenType: 'Bearer',
-      accessToken,
-      expiresIn: this.tokens.accessTtl,
-      refreshToken,
-      refreshExpiresIn: this.tokens.refreshTtl,
-      sessionId,
-      context: { orgId: context.orgId, membershipId: context.membershipId },
-    };
+  private async consumeRefreshToken(refreshToken: string): Promise<{ sessionId: string; userId: string }> {
+    const outcome = await this.tokens.consumeRefreshToken(refreshToken);
+    if (outcome.kind === 'superseded') {
+      throw unauthorized('refresh_token_superseded', 'This refresh token was just rotated by another request; use the newer one');
+    }
+    if (outcome.kind === 'reused') {
+      await this.sessions.revoke({ sessionId: outcome.sessionId }, 'refresh_token_reuse', null, null);
+      throw unauthorized('refresh_token_reused', 'This sign-in was ended for your safety. Please sign in again.');
+    }
+    if (outcome.kind === 'invalid') throw unauthorized('refresh_token_invalid', 'Refresh token is invalid or expired');
+    return outcome;
   }
 
   private async recordConsent(tx: IamTx, userId: string, consent: RegisterRequest['consent'], meta: RequestMeta): Promise<void> {
-    const rows = [
-      { purpose: 'terms' as const, version: consent.termsVersion, granted: true },
-      { purpose: 'privacy' as const, version: consent.privacyVersion, granted: true },
-      { purpose: 'ai_processing' as const, version: consent.privacyVersion, granted: consent.aiProcessing },
-      { purpose: 'marketing' as const, version: consent.privacyVersion, granted: consent.marketing },
-    ];
-    await tx.insert(schema.consentRecords).values(
-      rows.map((c) => ({ id: newId(), userId, purpose: c.purpose, policyVersion: c.version, granted: c.granted, ip: meta.ip, userAgent: meta.userAgent })),
-    );
+    await recordConsent(tx, userId, consent, meta);
   }
 
   private async recordFailure(idKey: string, userId: string | null, meta: RequestMeta): Promise<void> {
@@ -403,4 +390,17 @@ export class AuthService {
   private assertActive(user: UserRow): void {
     if (user.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
   }
+}
+
+/** Terms, privacy, AI processing and marketing choices, as given at sign-up. Also used by single sign-on. */
+export async function recordConsent(tx: IamTx, userId: string, consent: RegisterRequest['consent'], meta: RequestMeta): Promise<void> {
+  const rows = [
+    { purpose: 'terms' as const, version: consent.termsVersion, granted: true },
+    { purpose: 'privacy' as const, version: consent.privacyVersion, granted: true },
+    { purpose: 'ai_processing' as const, version: consent.privacyVersion, granted: consent.aiProcessing },
+    { purpose: 'marketing' as const, version: consent.privacyVersion, granted: consent.marketing },
+  ];
+  await tx.insert(schema.consentRecords).values(
+    rows.map((c) => ({ id: newId(), userId, purpose: c.purpose, policyVersion: c.version, granted: c.granted, ip: meta.ip, userAgent: meta.userAgent })),
+  );
 }

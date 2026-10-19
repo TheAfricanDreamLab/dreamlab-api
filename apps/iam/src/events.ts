@@ -4,6 +4,8 @@ export const IamEvents = {
   UserVerified: 'user.verified',
   UserPasswordChanged: 'user.password_changed',
   UserLockedOut: 'user.locked_out',
+  UserMfaEnabled: 'user.mfa_enabled',
+  UserMfaDisabled: 'user.mfa_disabled',
   SessionCreated: 'session.created',
   SessionRevoked: 'session.revoked',
   OrgCreated: 'org.created',
@@ -16,4 +18,9 @@ export const IamEvents = {
   RoleRevoked: 'role.revoked',
   UnitChanged: 'org_unit.changed',
   GroupChanged: 'group.changed',
+  DomainVerified: 'org_domain.verified',
+  SsoChanged: 'sso_connection.changed',
+  ScimChanged: 'scim.changed',
+  RoleChanged: 'role.changed',
+  SecurityPolicyChanged: 'org_security.changed',
 } as const;

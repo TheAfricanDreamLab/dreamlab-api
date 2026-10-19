@@ -28,6 +28,7 @@ export class SessionsService {
     method: AuthMethod,
     context: { orgId: string | null; membershipId: string | null },
     meta: RequestMeta,
+    mfa = false,
   ): Promise<SessionRow> {
     const [row] = await tx
       .insert(schema.sessions)
@@ -37,6 +38,7 @@ export class SessionsService {
         authMethod: method,
         activeOrgId: context.orgId,
         activeMembershipId: context.membershipId,
+        mfaAt: mfa ? new Date() : null,
         ip: meta.ip,
         userAgent: meta.userAgent?.slice(0, 512) ?? null,
         expiresAt: new Date(Date.now() + this.tokens.refreshTtl * 1000),
@@ -65,6 +67,12 @@ export class SessionsService {
       .update(schema.sessions)
       .set({ lastUsedAt: new Date(), expiresAt: new Date(Date.now() + this.tokens.refreshTtl * 1000), ...patch })
       .where(eq(schema.sessions.id, sessionId));
+  }
+
+  /** The session passed a second factor. */
+  async markMfa(sessionId: string): Promise<SessionRow | null> {
+    const [row] = await this.db.sys.update(schema.sessions).set({ mfaAt: new Date() }).where(eq(schema.sessions.id, sessionId)).returning();
+    return row ?? null;
   }
 
   async list(userId: string): Promise<SessionRow[]> {

@@ -1,12 +1,12 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { ScopeType } from '@dreamlab/contracts';
+import { isSystemRoleKey, type ScopeType } from '@dreamlab/contracts';
 import { forbidden, REDIS, unauthorized } from '@lib/common';
 import type Redis from 'ioredis';
 import { AUTHZ_CHECKER, AuthzChecker } from './authz';
 import { AuthenticatedRequest, IS_PUBLIC, PermissionRequirement, REQUIRED_PERMISSION } from './decorators';
 import { bearerToken, JwtVerifier, TokenInvalidError } from './jwt-verifier';
-import { hasOrgPermission, Principal, principalFromClaims } from './principal';
+import { hasOrgPermission, needsMfa, Principal, principalFromClaims } from './principal';
 
 export const JWT_VERIFIER = Symbol('JWT_VERIFIER');
 
@@ -92,6 +92,10 @@ export class PermissionsGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const principal = req.principal;
     if (!principal) throw unauthorized('token_missing', 'Authentication required');
+    // Checked before anything else, so no path below can grant an admin permission without it.
+    if (needsMfa(principal, requirement.permission)) {
+      throw forbidden('mfa_required', 'This needs your authenticator app. Confirm a code (POST /v1/auth/mfa/step-up) and try again.');
+    }
     if (principal.platformAdmin && !principal.stale) return true;
 
     const params = req.params ?? {};
@@ -114,7 +118,8 @@ export class PermissionsGuard implements CanActivate {
     if (!orgId) throw forbidden('org_context_required', 'This action needs an organisation context');
 
     if (hasOrgPermission(principal, requirement.permission)) return true;
-    if (principal.stale && (await ask(orgId))) return true;
+    // Custom roles (IAM-18) are defined per organisation, so only IAM knows what they grant.
+    if ((principal.stale || principal.roles.some((r) => !isSystemRoleKey(r))) && (await ask(orgId))) return true;
     if (requirement.scope) {
       const scopeId = params[requirement.scope.param];
       if (scopeId && (await ask(orgId, { scopeType: requirement.scope.type, scopeId }))) return true;

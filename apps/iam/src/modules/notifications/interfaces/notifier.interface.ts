@@ -1,7 +1,7 @@
 import type { OtpPurpose } from '@dreamlab/contracts';
 
 export interface OtpMessage {
-  channel: 'email' | 'sms';
+  channel: 'email' | 'sms' | 'whatsapp';
   destination: string;
   code: string;
   purpose: OtpPurpose;

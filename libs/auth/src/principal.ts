@@ -1,5 +1,6 @@
 import {
   AccessTokenClaims,
+  MFA_PROTECTED_PERMISSIONS,
   PERMISSIONS,
   Permission,
   permissionsForRole,
@@ -18,6 +19,10 @@ export interface Principal {
   authzVersion: number;
   tokenId: string;
   expiresAt: number;
+  /** How the session authenticated; contains 'mfa' once a second factor passed. */
+  amr: string[];
+  /** The active context requires a second factor for admin permissions. */
+  mfaRequired: boolean;
   /**
    * The user's roles changed after this token was issued. Its role claims can no longer be
    * trusted, so permissions are re-checked with IAM instead of read from the token.
@@ -36,7 +41,14 @@ export function principalFromClaims(claims: AccessTokenClaims): Principal {
     authzVersion: claims.azv,
     tokenId: claims.jti,
     expiresAt: claims.exp,
+    amr: claims.amr ?? [],
+    mfaRequired: claims.mfr ?? false,
   };
+}
+
+/** The context requires a second factor for this permission, and the session has not passed one. */
+export function needsMfa(principal: Pick<Principal, 'amr' | 'mfaRequired'>, permission: Permission): boolean {
+  return principal.mfaRequired && !principal.amr.includes('mfa') && MFA_PROTECTED_PERMISSIONS.includes(permission);
 }
 
 /** Permissions the principal holds across its whole active organisation. */

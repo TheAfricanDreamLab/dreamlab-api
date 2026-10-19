@@ -16,9 +16,11 @@ export class MeService {
   constructor(
     @InjectDatabase() private readonly db: IamDatabase,
     private readonly loader: MembershipLoader,
+    private readonly authz: AuthzService,
   ) {}
 
   async me(principal: Principal) {
+    const permissions = await this.authz.orgWidePermissions(principal);
     // A person's own memberships span organisations, so this read is deliberately cross-tenant.
     return this.db.system(async (tx) => {
       const [user] = await tx.select().from(users).where(eq(users.id, principal.userId));
@@ -27,7 +29,7 @@ export class MeService {
         .select({ m: memberships, o: organizations })
         .from(memberships)
         .innerJoin(organizations, eq(organizations.id, memberships.orgId))
-        .where(and(eq(memberships.userId, user.id), inArray(memberships.status, ['active', 'suspended', 'invited'])))
+        .where(and(eq(memberships.userId, user.id), inArray(memberships.status, ['active', 'suspended', 'invited', 'requested'])))
         .orderBy(asc(organizations.name));
       const assignments = await this.loader.assignments(tx, rows.map((r) => r.m.id));
       return {
@@ -43,7 +45,7 @@ export class MeService {
         },
         context: { orgId: principal.orgId, membershipId: principal.membershipId },
         platformAdmin: principal.platformAdmin,
-        permissions: AuthzService.effectivePermissions(principal),
+        permissions,
         memberships: rows.map((r) => ({
           membershipId: r.m.id,
           status: r.m.status,

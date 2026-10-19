@@ -10,7 +10,7 @@ export interface InjectResult<T = unknown> {
 /** Call a Fastify-backed Nest app in-process. */
 export async function request<T = any>(
   app: NestFastifyApplication,
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   url: string,
   options: { body?: unknown; token?: string; headers?: Record<string, string> } = {},
 ): Promise<InjectResult<T>> {
@@ -32,7 +32,8 @@ export function testEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     NODE_ENV: 'test',
     LOG_LEVEL: 'warn',
     AUTH_ISSUER: 'http://iam.test',
-    IAM_KEY_ENCRYPTION_SECRET: randomBytes(32).toString('base64'),
+    // Set once per run in global setup: every spec file boots against the same database and its stored keys.
+    IAM_KEY_ENCRYPTION_SECRET: process.env.E2E_KEY_ENCRYPTION_SECRET ?? randomBytes(32).toString('base64'),
     INTERNAL_GATEWAY_TOKEN: E2E_GATEWAY_TOKEN,
     BOOTSTRAP_ADMIN_EMAIL: 'admin@theafricandreamlab.com',
     BOOTSTRAP_ADMIN_PASSWORD: 'e2e-admin-password',

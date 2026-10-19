@@ -29,7 +29,7 @@
     "license-check": "license-checker-rseidelsohn --production --onlyAllow \"Apache-2.0;MIT;BSD-2-Clause;BSD-3-Clause;ISC;Unicode-3.0;Zlib;0BSD;BlueOak-1.0.0;Python-2.0;CC0-1.0\" --excludePrivatePackages"
   },
   "dependencies": {
-    "@dreamlab/contracts": "github:TheAfricanDreamLab/dreamlab-contracts#v0.5.0",
+    "@dreamlab/contracts": "github:TheAfricanDreamLab/dreamlab-contracts#v0.6.0",
     "@fastify/static": "10.1.6",
     "@nestjs/common": "11.2.7",
     "@nestjs/core": "11.2.7",
@@ -39,6 +39,7 @@
     "@nestjs/terminus": "11.1.1",
     "@nestjs/throttler": "6.7.1",
     "@node-rs/argon2": "2.2.2",
+    "@node-saml/node-saml": "5.1.0",
     "@ts-rest/core": "3.52.1",
     "amqp-connection-manager": "4.1.15",
     "amqplib": "0.10.9",
@@ -79,7 +80,8 @@
     "ts-node": "10.9.2",
     "tsconfig-paths": "4.2.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.71.2"
+    "typescript-eslint": "8.71.2",
+    "xml-crypto": "6.4.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

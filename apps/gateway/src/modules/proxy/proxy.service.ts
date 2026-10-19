@@ -10,9 +10,18 @@ import { TenantService } from '../tenancy/tenancy.service';
 /** Headers only the gateway may set. Anything a client sends under these names is dropped. */
 const INTERNAL_HEADERS = ['x-tenant-org-id', 'x-tenant-slug', 'x-gateway-token', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip'];
 const FORWARD_REQUEST_HEADERS = ['authorization', 'content-type', 'accept', 'accept-language', 'user-agent'];
+/** SCIM is called by identity providers with an organisation's SCIM token, which IAM checks; it is not a user JWT. */
+const SCIM_PATH = /^\/scim\/v2\//;
 const FORWARD_RESPONSE_HEADERS = ['content-type', 'retry-after', 'cache-control', 'www-authenticate'];
 /** A token for one organisation may still use these paths on another organisation's site (to switch). */
-const CONTEXT_NEUTRAL = [/^\/v1\/auth\//, /^\/v1\/me$/, /^\/v1\/invitations\/(accept|preview)$/, /^\/v1\/roles$/];
+const CONTEXT_NEUTRAL = [
+  /^\/v1\/auth\//,
+  /^\/v1\/me$/,
+  /^\/v1\/me\/joinable-orgs$/,
+  /^\/v1\/orgs\/[0-9a-f-]{36}\/join$/,
+  /^\/v1\/invitations\/(accept|preview)$/,
+  /^\/v1\/roles$/,
+];
 
 /** Paths a signed-in user may call on any organisation's site, whatever their active organisation. */
 export const isContextNeutral = (path: string): boolean => CONTEXT_NEUTRAL.some((re) => re.test(path));
@@ -40,7 +49,7 @@ export class ProxyService {
     const tenant = slug ? await this.tenants.resolve(slug) : null;
 
     // 2. Reject bad tokens at the edge, and tokens issued for a different organisation.
-    const token = bearerToken(req.headers.authorization);
+    const token = SCIM_PATH.test(path) ? null : bearerToken(req.headers.authorization);
     if (token) {
       let principal;
       try {
@@ -78,7 +87,7 @@ export class ProxyService {
     }
 
     const hasBody = !['GET', 'HEAD', 'DELETE'].includes(req.method) && req.body !== undefined && req.body !== null;
-    if (hasBody) headers['content-type'] = 'application/json';
+    if (hasBody) headers['content-type'] = SCIM_PATH.test(path) ? 'application/scim+json' : 'application/json';
     let upstream: Response;
     try {
       upstream = await fetch(new URL(req.url, upstreamBase), {

@@ -2,10 +2,11 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { exportJWK, generateKeyPair, importJWK, JWK, JWTHeaderParameters, KeyLike } from 'jose';
 import type { IamConfig } from '../../config';
 import { IamDatabase, schema } from '../../database';
+import { SecretBox } from './secret-box.service';
 
 const ALG = 'EdDSA';
 const REFRESH_MS = 60_000;
@@ -25,7 +26,6 @@ interface LoadedKey {
 @Injectable()
 export class SigningKeysService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SigningKeysService.name);
-  private readonly encryptionKey: Buffer;
   private keys = new Map<string, LoadedKey>();
   private active: LoadedKey | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -33,9 +33,8 @@ export class SigningKeysService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectDatabase() private readonly db: IamDatabase,
     @InjectConfig() private readonly config: IamConfig,
-  ) {
-    this.encryptionKey = Buffer.from(config.IAM_KEY_ENCRYPTION_SECRET, 'base64');
-  }
+    private readonly box: SecretBox,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.ensureActiveKey();
@@ -142,17 +141,10 @@ export class SigningKeysService implements OnModuleInit, OnModuleDestroy {
   }
 
   private encrypt(plaintext: string): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-    return ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ciphertext.toString('base64url')].join('.');
+    return this.box.encrypt(plaintext);
   }
 
   private decrypt(payload: string): string {
-    const [version, iv, tag, ciphertext] = payload.split('.');
-    if (version !== 'v1' || !iv || !tag || !ciphertext) throw new Error('Unrecognised key encryption format');
-    const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(iv, 'base64url'));
-    decipher.setAuthTag(Buffer.from(tag, 'base64url'));
-    return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]).toString('utf8');
+    return this.box.decrypt(payload);
   }
 }

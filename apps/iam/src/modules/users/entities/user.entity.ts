@@ -17,6 +17,11 @@ export const users = pgTable(
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     /** Incremented whenever the user's memberships or roles change; tokens carry it as `azv`. */
     authzVersion: integer('authz_version').notNull().default(0),
+    /** Authenticator app (IAM-19): TOTP secret, AES-256-GCM with IAM_KEY_ENCRYPTION_SECRET. */
+    mfaSecretEncrypted: text('mfa_secret_encrypted'),
+    mfaEnabledAt: timestamp('mfa_enabled_at', { withTimezone: true }),
+    /** SHA-256 of each unused recovery code. */
+    mfaRecoveryHashes: text('mfa_recovery_hashes').array().notNull().default([]),
     ...timestamps,
   },
   (t) => [

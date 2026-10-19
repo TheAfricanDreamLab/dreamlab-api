@@ -20,7 +20,7 @@ export class ProxyController {
     @InjectConfig() private readonly config: GatewayConfig,
   ) {}
 
-  @All(['v1/*', '.well-known/*'])
+  @All(['v1/*', '.well-known/*', 'scim/v2/*'])
   async iam(@Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
     await this.proxy.forward(req, reply, this.config.IAM_URL);
   }

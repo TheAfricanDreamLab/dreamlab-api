@@ -25,6 +25,15 @@ export async function createHttpApp(module: unknown, options: HttpAppOptions): P
       return typeof incoming === 'string' && /^[\w-]{8,128}$/.test(incoming) ? incoming : newId();
     },
   });
+  // SCIM clients send application/scim+json; parse it like JSON.
+  adapter.getInstance().addContentTypeParser(['application/scim+json'], { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      done(null, body === '' ? {} : JSON.parse(body as string));
+    } catch (err) {
+      (err as { statusCode?: number }).statusCode = 400;
+      done(err as Error, undefined);
+    }
+  });
   const app = await NestFactory.create<NestFastifyApplication>(module as never, adapter, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.enableShutdownHooks();
