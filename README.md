@@ -28,7 +28,7 @@ Request and response shapes come from [`@dreamlab/contracts`](https://github.com
 
 ## Run it locally
 
-Requirements: Node 22+, pnpm 10, Docker.
+Requirements: Node 24+, pnpm 10, Docker.
 
 ```sh
 pnpm install

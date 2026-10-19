@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # One image per service: docker build --build-arg APP=iam -t dreamlab-iam .
-ARG NODE_VERSION=22.20-alpine
+ARG NODE_VERSION=24.15-alpine
 
 FROM node:${NODE_VERSION} AS base
 RUN apk add --no-cache git && corepack enable
