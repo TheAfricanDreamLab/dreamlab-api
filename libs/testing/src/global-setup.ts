@@ -19,9 +19,14 @@ export default async function globalSetup(): Promise<void> {
         { source: join(__dirname, '..', '..', '..', 'docker', 'postgres', 'init.sql'), target: '/docker-entrypoint-initdb.d/10-service-databases.sql' },
       ])
       .start(),
-    new RedisContainer('redis:7.4-alpine').start(),
+    // Clustered, like Azure Managed Redis: a MULTI across hash slots fails here as it does there.
+    new RedisContainer('redis:7.4-alpine').withCommand(['redis-server', '--cluster-enabled', 'yes']).start(),
     new RabbitMQContainer('rabbitmq:4.1-management-alpine').withStartupTimeout(180_000).start(),
   ]);
+
+  // One node owns every slot, so plain (non-cluster) clients keep working.
+  const slots = await redis.exec(['redis-cli', 'cluster', 'addslotsrange', '0', '16383']);
+  if (slots.exitCode !== 0 || !slots.output.includes('OK')) throw new Error(`Redis cluster setup failed: ${slots.output}`);
 
   const pg = (user: string) => `postgres://${user}:${user}@${postgres.getHost()}:${postgres.getPort()}/dreamlab_iam`;
   Object.assign(process.env, {

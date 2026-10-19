@@ -44,9 +44,10 @@ export class AuthzService {
       .returning({ id: users.id, v: users.authzVersion });
     // Every service's guard compares tokens with this; older tokens are re-checked with IAM.
     // Tokens live ACCESS_TOKEN_TTL at most, so the marker only needs to outlive them.
-    const multi = this.redis.multi();
-    for (const r of rows) multi.set(authzVersionKey(r.id), String(r.v), 'EX', this.config.ACCESS_TOKEN_TTL_SECONDS + 120);
-    await multi.exec();
+    // A pipeline, not MULTI: each marker stands alone, and users' keys sit in different cluster slots.
+    const pipeline = this.redis.pipeline();
+    for (const r of rows) pipeline.set(authzVersionKey(r.id), String(r.v), 'EX', this.config.ACCESS_TOKEN_TTL_SECONDS + 120);
+    await pipeline.exec();
   }
 
   async isPlatformAdmin(userId: string): Promise<boolean> {

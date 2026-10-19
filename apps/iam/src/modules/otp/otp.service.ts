@@ -28,8 +28,9 @@ export class OtpService {
     this.limiter = new RedisRateLimiter(redis, 'iam:rl:');
   }
 
+  /** The hash tag keeps a code and its attempts counter in one cluster slot (they change in one MULTI). */
   private key(purpose: OtpPurpose, identifier: string): string {
-    return `iam:otp:${purpose}:${sha256(identifier)}`;
+    return `iam:otp:{${purpose}:${sha256(identifier)}}`;
   }
 
   private hash(code: string, purpose: OtpPurpose, identifier: string): string {
