@@ -353,7 +353,7 @@ const collaboration: CourseAuthoring = {
     to: '#4FA86A',
     symbol: '✦',
     imageUrl: "https://images.unsplash.com/photo-1653566031535-bcf33e1c2893?auto=format&fit=crop&w=1200&q=70",
-    imageAlt: "Three young men talk around a meeting table with laptops and a tablet, one listening thoughtfully with his hand to his chin.",
+    imageAlt: "Three colleagues talk around a meeting table with laptops and a tablet, one listening thoughtfully with a hand to the chin.",
     imageCredit: "Photo: UK Black Tech / Unsplash",
   },
   trailer: {
