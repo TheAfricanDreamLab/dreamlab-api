@@ -70,6 +70,7 @@ export class CatalogReadService {
       audience: row.audience,
       prerequisites: row.prerequisites,
       instructors: row.instructors,
+      trailer: row.trailer ?? null,
       versionId: version?.id ?? null,
       versionNo: version?.versionNo ?? null,
       modules,

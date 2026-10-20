@@ -30,7 +30,7 @@ const moduleDefine: Module = {
       key: 'why-problem-solving',
       type: 'lesson',
       title: 'Why problem solving comes first',
-      minutes: 10,
+      minutes: 24,
       required: true,
       payload: {
         steps: [
@@ -41,8 +41,24 @@ const moduleDefine: Module = {
               {
                 id: 'welcome-text',
                 type: 'text',
-                body: "Welcome to Problem Solving, the first course of The African Dream Lab.\n\nEverything you build in the next fifteen weeks starts here. A venture, a community project, a campaign, a career move: each one is a response to a problem. If you see the problem clearly, the rest of the work gets easier. If you see it wrongly, even brilliant effort is wasted.\n\nThis course is short, practical and built around your own life. By the end you will have a **Problem Definition Canvas**: one page that explains a real problem you care about, its causes, your options and the experiment you will run next.",
+                body: "Welcome to Problem Solving, the first course of The African Dream Lab.\n\nEverything you build in the next fifteen weeks starts here. A venture, a community project, a campaign, a career move: each one is a response to a problem. If you see the problem clearly, the rest of the work gets easier. If you see it wrongly, even brilliant effort is wasted.\n\nThis course is short, practical and built around your own life. By the end you will have a **Problem Definition Canvas**: one page that explains a real problem you care about, its causes, your options and the experiment you will run next.\n\nStart with the talk below. It is about why your generation, and the problems you choose to take on, matter.",
               },
+              {
+                id: 'welcome-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'kcEIsbO0ivA',
+                title: "Fred Swaniker: The leaders who ruined Africa, and the generation who can fix it",
+                channel: "TED",
+                durationS: 811,
+                caption: "Fred Swaniker, founder of the African Leadership Academy, on the leaders who held the continent back and the generation who can move it forward. Watch for why he thinks leadership matters most where institutions are weak. As you watch, ask yourself: which problems around me are waiting for someone to lead?",
+              },
+            ],
+          },
+          {
+            id: 'confidence',
+            title: "Where you are starting from",
+            blocks: [
               {
                 id: 'confidence-scale',
                 type: 'scale',
@@ -58,6 +74,14 @@ const moduleDefine: Module = {
             id: 'meet-amina',
             title: 'Meet Amina',
             blocks: [
+              {
+                id: 'amina-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Tomatoes_on_sale_at_the_Monday_Market_in_Kakuri%2C_Kaduna_06.jpg/1280px-Tomatoes_on_sale_at_the_Monday_Market_in_Kakuri%2C_Kaduna_06.jpg",
+                alt: "Tomatoes laid out in small heaps on sacking on the ground, with more piled high in plastic buckets in the foreground.",
+                caption: "Tomatoes on sale at the Monday Market in Kakuri, Kaduna, Nigeria. Amina is a fictional trader; markets like this are real.",
+                credit: "Photo: Kambai Akau / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'amina-story',
                 type: 'callout',
@@ -200,7 +224,7 @@ const moduleDefine: Module = {
       key: 'problem-symptom-solution',
       type: 'lesson',
       title: 'Problem, symptom or solution in disguise?',
-      minutes: 12,
+      minutes: 17,
       required: true,
       payload: {
         steps: [
@@ -212,6 +236,16 @@ const moduleDefine: Module = {
                 id: 'three-things-text',
                 type: 'text',
                 body: "When people say “the problem is…”, they usually mean one of three different things. Learning to tell them apart is the single most useful habit in this course.",
+              },
+              {
+                id: 'tomato-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: '_oM_MZ1hTGc',
+                title: "Reducing Postharvest Loss in Nigeria - Tomatoes",
+                channel: "Global Alliance for Improved Nutrition (GAIN)",
+                durationS: 328,
+                caption: "A short film from Nigeria on tomatoes lost between the farm and the market. As you watch, sort what you see into three piles: the visible signs (spoilt tomatoes), the problem (lost food and income) and what might be causing it. Amina is fictional. This problem is real.",
               },
               {
                 id: 'three-things-terms',
@@ -232,6 +266,14 @@ const moduleDefine: Module = {
             id: 'sort-amina',
             title: 'Sort what Amina hears',
             blocks: [
+              {
+                id: 'baskets-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Baskets_of_freshly_harvested_tomatoes_at_Pambeguwa_perishable_market_05.jpg/1280px-Baskets_of_freshly_harvested_tomatoes_at_Pambeguwa_perishable_market_05.jpg",
+                alt: "Rows of tall woven baskets heaped with tomatoes and topped with leaves at an open-air market, with traders, motorcycles and a minibus behind them.",
+                caption: "Baskets of freshly harvested tomatoes at Pambeguwa market in northern Nigeria. Look at how deep they are, then read what the older trader says below.",
+                credit: "Photo: Friday musa / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'sort-example',
                 type: 'example',
@@ -372,7 +414,7 @@ const moduleDefine: Module = {
       key: 'problem-statements',
       type: 'lesson',
       title: 'Writing a sharp problem statement',
-      minutes: 13,
+      minutes: 19,
       required: true,
       payload: {
         steps: [
@@ -384,6 +426,16 @@ const moduleDefine: Module = {
                 id: 'anatomy-text',
                 type: 'text',
                 body: "A problem statement is one to three sentences that anyone could read and understand what is wrong, for whom, and why it matters. It is the first box on your canvas, and everything else hangs from it.\n\nA good statement has five parts.",
+              },
+              {
+                id: 'statement-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'w7l8qEj1JX0',
+                title: "How to define a problem statement in design thinking | Design thinking process",
+                channel: "Canva",
+                durationS: 339,
+                caption: "A short guide to defining a problem statement, from a design-thinking point of view. Compare its advice with the five parts below: who, what gap, where and when, how much, and why it matters.",
               },
               {
                 id: 'anatomy-framework',
@@ -510,6 +562,14 @@ const moduleDefine: Module = {
             id: 'wrong-problem-cost',
             title: 'The cost of the wrong problem',
             blocks: [
+              {
+                id: 'pump-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Flickr_-_usaid.africa_-_Water_pump.jpg/1280px-Flickr_-_usaid.africa_-_Water_pump.jpg",
+                alt: "A woman carrying a baby on her back works a community hand pump while a girl fills a basin and children play nearby.",
+                caption: "A community hand pump. When a pump like this breaks, families may have to walk much further for water.",
+                credit: "Photo: USAID Africa Bureau / Wikimedia Commons, public domain",
+              },
               {
                 id: 'uwase-caution',
                 type: 'callout',
@@ -660,7 +720,7 @@ const moduleDiagnose: Module = {
       key: 'better-questions',
       type: 'lesson',
       title: 'Asking better questions',
-      minutes: 12,
+      minutes: 30,
       required: true,
       payload: {
         steps: [
@@ -672,6 +732,16 @@ const moduleDiagnose: Module = {
                 id: 'questions-text',
                 type: 'text',
                 body: "Diagnosis starts with people. Before any spreadsheet, you need to hear from the people who live with the problem.\n\nBut people are kind. If you ask “Would you use my idea?”, most will say yes to be polite. If you ask “Don’t you think the baskets are the problem?”, many will agree because you seem to want them to. The answers you get depend on the questions you ask.",
+              },
+              {
+                id: 'users-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'z1iF1c8w5Lg',
+                title: "How To Talk To Users | Startup School",
+                channel: "Y Combinator",
+                durationS: 1051,
+                caption: "Y Combinator’s talk on how to talk to users. It is aimed at start-up founders, but the advice works for any problem. Listen for how often it comes back to asking about real past behaviour rather than opinions about your idea. It runs about 17 minutes, so on slow data you may prefer to finish this lesson first and watch later.",
               },
               {
                 id: 'questions-terms',
@@ -740,6 +810,14 @@ const moduleDiagnose: Module = {
             id: 'observe',
             title: 'Watch, don’t only ask',
             blocks: [
+              {
+                id: 'kejetia-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Modern_market_hall_of_Kejetia_market.jpg/1280px-Modern_market_hall_of_Kejetia_market.jpg",
+                alt: "A vast market hall with a colourful patterned roof, stalls on several levels and crowds of shoppers on the floor below.",
+                caption: "Inside the new Kejetia Market building in Kumasi, Ghana.",
+                credit: "Photo: Afus199620 / Wikimedia Commons, CC0",
+              },
               {
                 id: 'observe-text',
                 type: 'text',
@@ -832,7 +910,7 @@ const moduleDiagnose: Module = {
       key: 'five-whys',
       type: 'lesson',
       title: 'The 5 Whys',
-      minutes: 12,
+      minutes: 15,
       required: true,
       payload: {
         steps: [
@@ -844,6 +922,16 @@ const moduleDiagnose: Module = {
                 id: 'whys-text',
                 type: 'text',
                 body: "The 5 Whys is the simplest root-cause tool there is. You state the problem, ask “why does this happen?”, and then ask “why?” of the answer. Keep going, usually about five times, until you reach a cause you could actually change.\n\nThe method comes from Toyota’s manufacturing tradition, where it was used to trace faults on the factory floor back to their source. It works just as well on a market stall or a school register.",
+              },
+              {
+                id: 'whys-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'SrlYkx41wEE',
+                title: "Clarifying the '5 Whys' Problem-Solving Method",
+                channel: "Lean Enterprise Institute",
+                durationS: 200,
+                caption: "The Lean Enterprise Institute, which studies and teaches Toyota’s methods, clarifies what the 5 Whys is for and how it is meant to be used. Watch for the ways it can go wrong when used carelessly, then compare them with the traps later in this lesson.",
               },
               {
                 id: 'whys-example',
@@ -951,7 +1039,7 @@ const moduleDiagnose: Module = {
       key: 'fishbone',
       type: 'lesson',
       title: 'Fishbone: many causes at once',
-      minutes: 12,
+      minutes: 15,
       required: true,
       payload: {
         steps: [
@@ -963,6 +1051,16 @@ const moduleDiagnose: Module = {
                 id: 'fishbone-text',
                 type: 'text',
                 body: "The 5 Whys digs deep along one line. The **fishbone diagram** spreads wide. It was developed by the Japanese quality expert Kaoru Ishikawa, and it is named for its shape.\n\nYou write the problem at the head of the fish. Each big bone is a category of cause. Along each bone you list the possible causes in that category. When you finish, you can see the whole skeleton of the problem at once, not just the first cause that came to mind.",
+              },
+              {
+                id: 'fishbone-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'mLvizyDFLQ4',
+                title: "How to create cause-and-effect diagrams",
+                channel: "Harvard Online",
+                durationS: 197,
+                caption: "A three-minute walkthrough of building a cause-and-effect (fishbone) diagram. Watch how the categories push a team to look beyond the first cause that comes to mind.",
               },
               {
                 id: 'fishbone-framework',
@@ -983,6 +1081,14 @@ const moduleDiagnose: Module = {
             id: 'sort-causes',
             title: 'Build Wanjiru’s fishbone',
             blocks: [
+              {
+                id: 'matatu-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/26/Matatu_bus.jpg/1280px-Matatu_bus.jpg",
+                alt: "A brightly painted orange matatu minibus with a conductor standing in its open doorway, turning on a busy city street.",
+                caption: "A matatu in Nairobi, Kenya. These privately owned minibuses carry a large share of the city’s commuters.",
+                credit: "Photo: Francis Akuka for the Wikimedia Foundation / Wikimedia Commons, CC0",
+              },
               {
                 id: 'wanjiru-story',
                 type: 'callout',
@@ -1092,7 +1198,7 @@ const moduleDiagnose: Module = {
       key: 'data-and-anecdotes',
       type: 'lesson',
       title: 'Data, anecdotes and base rates',
-      minutes: 13,
+      minutes: 19,
       required: true,
       payload: {
         steps: [
@@ -1100,6 +1206,14 @@ const moduleDiagnose: Module = {
             id: 'loud-story',
             title: 'The loudest story',
             blocks: [
+              {
+                id: 'lagos-market-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f4/IThe_biggest_market_in_West_Africa%2C_dumota_Market%2C_Lagos.jpg/1280px-IThe_biggest_market_in_West_Africa%2C_dumota_Market%2C_Lagos.jpg",
+                alt: "A packed market street seen from above, with crowds of shoppers, umbrellas, clothes on mannequins and yellow minibuses inching through.",
+                caption: "Idumota Market, Lagos, Nigeria.",
+                credit: "Photo: Sir Demo / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'loud-text',
                 type: 'text',
@@ -1177,6 +1291,16 @@ const moduleDiagnose: Module = {
             id: 'survivors',
             title: 'Who did you ask?',
             blocks: [
+              {
+                id: 'survivorship-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'P9WFpVsRtQg',
+                title: "Survivorship Bias",
+                channel: "Eddie Woo",
+                durationS: 369,
+                caption: "Teacher Eddie Woo explains survivorship bias with a classic example. Keep it in mind for Kwame’s questionnaire below: whose answers are missing from the evidence?",
+              },
               {
                 id: 'survivor-scenario',
                 type: 'scenario',
@@ -1401,7 +1525,7 @@ const moduleGenerate: Module = {
       key: 'go-wide',
       type: 'lesson',
       title: 'Go wide before you go deep',
-      minutes: 11,
+      minutes: 16,
       required: true,
       payload: {
         steps: [
@@ -1413,6 +1537,16 @@ const moduleGenerate: Module = {
                 id: 'modes-text',
                 type: 'text',
                 body: "You now understand your problem far better than when you started. The temptation is to grab the first good idea and run. Resist it for one more lesson.\n\nCreative problem solving moves between two modes. **Divergent thinking** opens up: many ideas, no judging. **Convergent thinking** closes down: compare, choose, commit. Both matter. The mistake is doing them at the same time, killing each idea the moment it appears.",
+              },
+              {
+                id: 'brainstorm-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: '2B7aCIuEDxk',
+                title: "7 Rules for the Perfect Brainstorming Session",
+                channel: "IDEO U",
+                durationS: 324,
+                caption: "IDEO, one of the design firms that popularised these methods, shares its rules for a good brainstorm. Listen especially for “defer judgement” and “go for quantity”: both are about keeping divergent and convergent thinking apart.",
               },
               {
                 id: 'modes-terms',
@@ -1494,6 +1628,14 @@ const moduleGenerate: Module = {
             title: 'Run an idea session',
             blocks: [
               {
+                id: 'notes-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Brainstorming_Customer_Feedback_%281%29.jpg/1280px-Brainstorming_Customer_Feedback_%281%29.jpg",
+                alt: "Hands arranging handwritten sticky notes into rows on a wooden table, beside a notebook, a pen and a pad of yellow notes.",
+                caption: "Ideas on sticky notes can be moved, grouped and combined, which makes them ideal for an idea session.",
+                credit: "Photo: Steveonmz / Wikimedia Commons, CC BY-SA 4.0",
+              },
+              {
                 id: 'session-order-block',
                 type: 'order',
                 prompt: 'Put the steps of a good idea session in order.',
@@ -1545,7 +1687,7 @@ const moduleGenerate: Module = {
       key: 'how-might-we',
       type: 'lesson',
       title: 'Reframing: “How might we…?”',
-      minutes: 11,
+      minutes: 17,
       required: true,
       payload: {
         steps: [
@@ -1559,6 +1701,16 @@ const moduleGenerate: Module = {
                 body: "A problem statement describes what is wrong. A **How might we** question turns it into an invitation to create.\n\n- *How* assumes there is a way.\n- *Might* says it is fine to try ideas that may not work.\n- *We* says this is shared work.\n\nThe phrase is widely used by design teams around the world because it is simple and it works. The skill is getting the size of the question right.",
               },
               {
+                id: 'hmw-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'sRGk5oKXgCk',
+                title: "DESIGN SPRINT - HOW MIGHT WE | Aj&Smart",
+                channel: "AJ&Smart",
+                durationS: 382,
+                caption: "Design-sprint agency AJ&Smart shows how a team turns problems into How might we questions. Notice how each question keeps the problem in view but leaves the answer open.",
+              },
+              {
                 id: 'hmw-reveal',
                 type: 'reveal',
                 prompt: 'Wanjiru writes “How might we build a new terminal for our SACCO?” What is wrong with it? Think, then tap.',
@@ -1570,6 +1722,14 @@ const moduleGenerate: Module = {
             id: 'hmw-size',
             title: 'Not too wide, not too narrow',
             blocks: [
+              {
+                id: 'intersection-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/KiXX_matatu_at_a_busy_Nairobi_intersection.jpg/1280px-KiXX_matatu_at_a_busy_Nairobi_intersection.jpg",
+                alt: "A matatu covered in bold graffiti-style artwork turns at a city intersection beside billboards and traffic lights.",
+                caption: "A matatu at a busy intersection in Nairobi, Kenya.",
+                credit: "Photo: Lebu Ayiga / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'hmw-choice',
                 type: 'choice',
@@ -1676,7 +1836,7 @@ const moduleGenerate: Module = {
       key: 'constraints-analogies',
       type: 'lesson',
       title: 'Constraints and analogies',
-      minutes: 12,
+      minutes: 22,
       required: true,
       payload: {
         steps: [
@@ -1688,6 +1848,24 @@ const moduleGenerate: Module = {
                 id: 'constraints-text',
                 type: 'text',
                 body: "Unreliable power. Expensive data. Little capital. Cash economies. Long distances. It is easy to see these only as obstacles.\n\nBut constraints also force creativity. When you cannot do the expensive, obvious thing, you have to find the clever, simple one. Many of the most useful innovations from the continent were shaped by exactly these limits.",
+              },
+              {
+                id: 'shake-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'YrZTho_o_is',
+                title: "Embrace the Shake | Phil Hansen | TED Talks",
+                channel: "TED",
+                durationS: 601,
+                caption: "Artist Phil Hansen developed a tremor that stopped him drawing the way he had trained to. Watch how a limit he could not remove became the source of his best work. Then think about the limits on your own problem.",
+              },
+              {
+                id: 'mpesa-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/M-PESA_mobile_money_and_Equity_agent%2C_Nairobi%2C_Kenya.jpg/1280px-M-PESA_mobile_money_and_Equity_agent%2C_Nairobi%2C_Kenya.jpg",
+                alt: "A woman stands at the barred counter of a small shop painted with M-PESA and Equity Agent signs, talking to the smiling agent inside.",
+                caption: "An M-PESA mobile money and bank agent in Nairobi, Kenya.",
+                credit: "Photo: Fiona Graham / Wikimedia Commons, CC BY-SA 2.0",
               },
               {
                 id: 'mpesa-context',
@@ -1902,7 +2080,7 @@ const moduleDecide: Module = {
       key: 'criteria-trade-offs',
       type: 'lesson',
       title: 'Criteria and trade-offs',
-      minutes: 13,
+      minutes: 15,
       required: true,
       payload: {
         steps: [
@@ -1911,12 +2089,36 @@ const moduleDecide: Module = {
             title: 'Fatou’s three roads',
             blocks: [
               {
+                id: 'atelier-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/67/Atelier_de_couture%2C_Medina%2C_Dakar%2C_S%C3%A9n%C3%A9gal.jpg/1280px-Atelier_de_couture%2C_Medina%2C_Dakar%2C_S%C3%A9n%C3%A9gal.jpg",
+                alt: "A crowded tailoring workshop where several tailors work at sewing machines, surrounded by stacks and rolls of colourful printed fabric.",
+                caption: "A tailoring workshop in the Medina, Dakar, Senegal. Fatou’s studio is fictional; workshops like this are real.",
+                credit: "Photo: Julien saison / Wikimedia Commons, CC BY-SA 4.0",
+              },
+              {
                 id: 'fatou-story',
                 type: 'callout',
                 tone: 'story',
                 title: 'Fatou, fashion founder, Dakar',
                 body: "Fatou designs and sells dresses that mix wax prints with modern cuts. She works from a small studio in Dakar with two tailors. Sales are growing, mostly through Instagram and WhatsApp, and she has saved enough to make one big move this year. She has three options:\n\n- **A.** Open a small boutique in a busy shopping area.\n- **B.** Invest in online sales: better photos, a clear size guide and a delivery partner.\n- **C.** Bid for a contract to make uniforms for a hotel group.\n\nEveryone has an opinion. Her mother says the boutique. Her friends say online. Her accountant says the contract.",
               },
+              {
+                id: 'matrix-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'xO7xJ1sTyPI',
+                title: "Decision Matrix Analysis: How to Make a Good Decision by Weighing Up Different Factors",
+                channel: "Mindtools Kineo",
+                durationS: 124,
+                caption: "A two-minute introduction to decision matrix analysis: listing options, scoring them against weighted factors and adding up the totals. You will build one for Fatou in a moment.",
+              },
+            ],
+          },
+          {
+            id: 'gut-check',
+            title: "Your gut answer",
+            blocks: [
               {
                 id: 'fatou-poll',
                 type: 'poll',
@@ -2043,7 +2245,7 @@ const moduleDecide: Module = {
       key: 'doors-and-premortems',
       type: 'lesson',
       title: 'One-way doors, two-way doors and the pre-mortem',
-      minutes: 12,
+      minutes: 18,
       required: true,
       payload: {
         steps: [
@@ -2056,6 +2258,22 @@ const moduleDecide: Module = {
                 type: 'text',
                 body: "Not every decision deserves the same care. Amazon founder Jeff Bezos popularised a simple way to tell them apart: **one-way doors** and **two-way doors**.\n\nA two-way door is reversible. If you walk through and do not like what you find, you can come back. Most decisions are like this. Make them quickly, learn, and adjust.\n\nA one-way door is hard or impossible to reverse: signing a long lease, spending all your savings, firing someone, publishing a child’s photo online. Slow down for these.",
               },
+              {
+                id: 'doors-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'rxsdOQa_QkM',
+                title: "Jeff Bezos explains one-way door decisions and two-way door decisions",
+                channel: "Startup Archive",
+                durationS: 191,
+                caption: "Jeff Bezos explains one-way and two-way door decisions in his own words. As you watch, think of one decision in your own life that felt like a one-way door but could have been tried first.",
+              },
+            ],
+          },
+          {
+            id: 'doors-check',
+            title: "Spot the two-way doors",
+            blocks: [
               {
                 id: 'doors-choice',
                 type: 'choice',
@@ -2102,6 +2320,16 @@ const moduleDecide: Module = {
                 body: "A post-mortem asks why something died, after it died. A **pre-mortem**, an idea from the psychologist Gary Klein, does it beforehand.\n\nBefore you commit, gather your team and say: *“Imagine it is six months from now. Our plan has failed badly. What went wrong?”* Everyone writes reasons on their own, then shares.\n\nIt works because it gives people permission to voice doubts. In a normal meeting, raising problems can sound disloyal. In a pre-mortem, finding problems is the task.",
               },
               {
+                id: 'premortem-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'SPnKKSuvyfY',
+                title: "Gary Klein: How to Frame a Pre-Mortem So It Actually Works",
+                channel: "Capital Allocators with Ted Seides",
+                durationS: 160,
+                caption: "The psychologist Gary Klein, who developed the pre-mortem, explains how to frame one so that people actually voice their doubts.",
+              },
+              {
                 id: 'premortem-terms',
                 type: 'key_terms',
                 terms: [
@@ -2116,6 +2344,14 @@ const moduleDecide: Module = {
             id: 'contract-scenario',
             title: 'The three-year contract',
             blocks: [
+              {
+                id: 'rwanda-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/59/A_view_of_Nyabarongo_river.jpg/1280px-A_view_of_Nyabarongo_river.jpg",
+                alt: "Green hills and a river valley lined with trees and fields, with a few houses and a dirt road in the foreground.",
+                caption: "The Nyabarongo river valley in Kamonyi district, Rwanda.",
+                credit: "Photo: Doltography / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'contract-scenario-block',
                 type: 'scenario',
@@ -2184,7 +2420,7 @@ const moduleDecide: Module = {
       key: 'smallest-experiment',
       type: 'lesson',
       title: 'The smallest useful experiment',
-      minutes: 13,
+      minutes: 16,
       required: true,
       payload: {
         steps: [
@@ -2196,6 +2432,16 @@ const moduleDecide: Module = {
                 id: 'test-text',
                 type: 'text',
                 body: "You have a chosen idea. You are fairly sure it will work. Now find out if you are right, as cheaply and quickly as possible.\n\nThe **smallest useful experiment** is the cheapest, fastest test that would actually change what you do next. Small enough to run this week. Useful enough that the result matters.\n\nEvery idea rests on assumptions. An experiment tests the riskiest one first.",
+              },
+              {
+                id: 'mvp-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: '1FoCbbbcYT8',
+                title: "Eric Ries-Building the Minimum Viable Product",
+                channel: "Entrepreneurship.org",
+                durationS: 205,
+                caption: "Eric Ries, author of The Lean Startup, on the minimum viable product: the smallest thing you can build to start learning. Compare his idea with the smallest useful experiment described here.",
               },
               {
                 id: 'test-framework',
@@ -2215,6 +2461,14 @@ const moduleDecide: Module = {
             id: 'threshold',
             title: 'Decide what success means first',
             blocks: [
+              {
+                id: 'aerial-market-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Aerial_view_of_a_busy_tomato_market_in_Lagos_Nigeria.jpg/1280px-Aerial_view_of_a_busy_tomato_market_in_Lagos_Nigeria.jpg",
+                alt: "An aerial view of a large open-air market where hundreds of baskets and crates of red tomatoes are spread across the ground among crowds of traders.",
+                caption: "A busy tomato market in Lagos, seen from above. Look closely and you can see tomatoes in both baskets and crates.",
+                credit: "Photo: Ayorinde Ogundele / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'threshold-reveal',
                 type: 'reveal',
@@ -2490,7 +2744,7 @@ const modulePeople: Module = {
       key: 'stakeholders',
       type: 'lesson',
       title: 'Stakeholders, power and incentives',
-      minutes: 12,
+      minutes: 29,
       required: true,
       payload: {
         steps: [
@@ -2504,6 +2758,16 @@ const modulePeople: Module = {
                 body: "A **stakeholder** is anyone who affects your problem, is affected by it, or could block or support a solution.\n\nThe first borehole plan in Uwase’s village failed partly because the committee thought only about the pump. But the water point involved many people: the women and girls who fetch most of the water, households paying the fee, cattle keepers whose animals drank at the trough, the village leader, sector officials, the mechanic in the next town, and the NGO that installed the pump years ago.\n\nEach of them sees the problem differently. Each of them wants something.",
               },
               {
+                id: 'listen-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'chXsLtHqfdM',
+                title: "Ernesto Sirolli: Want to help someone? Shut up and listen!",
+                channel: "TED",
+                durationS: 1030,
+                caption: "Ernesto Sirolli tells the story of an aid project in Zambia that went badly wrong, and what it taught him about listening to the people you want to help. Watch it with Uwase’s borehole committee in mind. It runs about 17 minutes.",
+              },
+              {
                 id: 'stakeholder-reveal',
                 type: 'reveal',
                 prompt: 'Of everyone in that list, who do you think had the most to gain from fixing the borehole, and the least say in the committee? Think, then tap.',
@@ -2515,6 +2779,14 @@ const modulePeople: Module = {
             id: 'grid',
             title: 'The power and interest grid',
             blocks: [
+              {
+                id: 'meeting-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/Rwanda_Spark_Community_Meeting.jpg/1280px-Rwanda_Spark_Community_Meeting.jpg",
+                alt: "A row of women, several holding small children, sit outdoors with raised fists at the start of a community meeting, with misty hills behind.",
+                caption: "A community group in Rwanda opens its weekly meeting. The people who carry a problem most deserve a real voice in solving it.",
+                credit: "Photo: Bet240 / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'grid-framework',
                 type: 'framework',
@@ -2645,7 +2917,7 @@ const modulePeople: Module = {
       key: 'ethics',
       type: 'lesson',
       title: 'Ethics: who carries the risk?',
-      minutes: 12,
+      minutes: 31,
       required: true,
       payload: {
         steps: [
@@ -2657,6 +2929,16 @@ const modulePeople: Module = {
                 id: 'intentions-text',
                 type: 'text',
                 body: "Most harm caused by problem solvers is not caused by bad people. It is caused by good people who did not think about who carries the risk.\n\nA fix that helps most people can still hurt some. A test that is cheap for you can be costly for the people you test it on. Before you act, ask five questions.",
+              },
+              {
+                id: 'single-story-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: 'D9Ihs241zeg',
+                title: "Chimamanda Ngozi Adichie: The Danger of a Single Story | TED",
+                channel: "TED",
+                durationS: 1156,
+                caption: "Novelist Chimamanda Ngozi Adichie on the danger of a single story. Watch for how one-dimensional stories strip people of dignity, then ask how your own project will describe the people it serves. It runs about 19 minutes and is worth every one.",
               },
               {
                 id: 'ethics-framework',
@@ -2693,6 +2975,14 @@ const modulePeople: Module = {
             id: 'data-scenario',
             title: 'Tunde’s data question',
             blocks: [
+              {
+                id: 'ikorodu-image',
+                type: 'image',
+                url: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/IWORO_MARKET_DAY_IN_IKORODU_LAGOS_STATE%2C_NIGERIA.jpg/1280px-IWORO_MARKET_DAY_IN_IKORODU_LAGOS_STATE%2C_NIGERIA.jpg",
+                alt: "A busy open-air market under dozens of large colourful umbrellas, with traders and shoppers between the stalls and houses behind.",
+                caption: "Market day in Ikorodu, Lagos State, Nigeria.",
+                credit: "Photo: Azzawaady / Wikimedia Commons, CC BY-SA 4.0",
+              },
               {
                 id: 'data-scenario-block',
                 type: 'scenario',
@@ -2784,7 +3074,7 @@ const modulePeople: Module = {
       key: 'problem-story',
       type: 'lesson',
       title: 'Telling the problem story',
-      minutes: 11,
+      minutes: 14,
       required: true,
       payload: {
         steps: [
@@ -2796,6 +3086,16 @@ const modulePeople: Module = {
                 id: 'story-text',
                 type: 'text',
                 body: "You will rarely solve a real problem alone. You will need a team, a leader’s approval, a funder’s money or a community’s trust. To get them, you must explain the problem so clearly that others care about it as much as you do.\n\nMost people pitch their solution first. Strong problem solvers tell the problem story first. When people understand the problem, they help you find and improve the solution. When they only hear the solution, they argue about it.",
+              },
+              {
+                id: 'story-video',
+                type: 'video',
+                provider: 'youtube',
+                videoId: '9JrRQ1oQWQk',
+                title: "Nancy Duarte: How to Tell a Story",
+                channel: "Stanford Graduate School of Business",
+                durationS: 181,
+                caption: "Presentation expert Nancy Duarte on telling a story that moves people to act. Notice how she links the shape of a story to persuasion, then compare it with the problem story structure in the next step.",
               },
               {
                 id: 'together-quote',
@@ -3279,7 +3579,21 @@ export const problemSolving: CourseAuthoring = {
     'Ambitious young builders and changemakers, roughly 18 to 30, who want to solve real problems in their communities, ventures or organisations. Especially valuable if you have an idea you are excited about and want to be sure it answers a real need. Designed to work well on a phone and on a slow connection.',
   prerequisites: 'None. You need curiosity, a real problem you care about, and the willingness to talk to people affected by it.',
   practicalOutput: 'Problem Definition Canvas',
-  cover: { from: '#0A3D29', to: '#1F9D6B', symbol: '◆' },
+  cover: {
+    from: '#0A3D29',
+    to: '#1F9D6B',
+    symbol: '◆',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Baskets_of_freshly_harvested_tomatoes_at_Pambeguwa_perishable_market_05.jpg/1280px-Baskets_of_freshly_harvested_tomatoes_at_Pambeguwa_perishable_market_05.jpg",
+    imageAlt: "Rows of tall woven baskets heaped with tomatoes and topped with leaves at an open-air market, with traders, motorcycles and a minibus behind them.",
+    imageCredit: "Photo: Friday musa / Wikimedia Commons, CC BY-SA 4.0",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'crjU5hu2fag',
+    title: "William Kamkwamba: How I harnessed the wind",
+    channel: "TED",
+    durationS: 356,
+  },
   instructors: [
     {
       name: 'The African Dream Lab Faculty',

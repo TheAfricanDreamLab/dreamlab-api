@@ -19,7 +19,14 @@ export const dreamLabProgramme: ProgramAuthoring = {
   programType: 'cohort_program',
   deliveryMode: 'blended',
   features: ['admissions', 'scholarships', 'programme_score', 'competency_score', 'capstone', 'portfolio', 'graduation_checklist', 'mentorship'],
-  cover: { from: '#0A0F1E', to: '#D8A84E', symbol: '✶' },
+  cover: {
+    from: '#0A0F1E',
+    to: '#D8A84E',
+    symbol: '✶',
+    imageUrl: "https://images.unsplash.com/photo-1594750852563-5ed8e0421d40?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "Two smiling graduates in black gowns and mortarboards stand side by side on a paved campus walkway.",
+    imageCredit: "Photo: Nqobile Vundla / Unsplash",
+  },
   phases: [
     {
       key: 'life-architecture',

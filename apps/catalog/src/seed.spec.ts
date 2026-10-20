@@ -1,4 +1,4 @@
-import { CourseAuthoringSchema, ProgramAuthoringSchema, toDeliveryContent } from '@dreamlab/contracts';
+import { CourseAuthoringSchema, isInteractiveBlock, ProgramAuthoringSchema, toDeliveryContent } from '@dreamlab/contracts';
 import { DATASETS } from './modules/seed/datasets';
 
 const dataset = DATASETS['dream-lab-test'];
@@ -22,6 +22,17 @@ describe('dream-lab-test dataset', () => {
   it('has one full course; the rest are outlines', () => {
     const full = dataset.courses.filter((c) => c.modules?.length);
     expect(full.map((c) => c.slug)).toEqual(['problem-solving']);
+  });
+
+  it('opens every lesson by teaching, with a video, before any question', () => {
+    const course = CourseAuthoringSchema.parse(dataset.courses.find((c) => c.slug === 'problem-solving'));
+    expect(course.trailer).toBeDefined();
+    for (const item of course.modules!.flatMap((m) => m.items)) {
+      if (item.type !== 'lesson') continue;
+      const blocks = item.payload.steps.flatMap((s) => s.blocks);
+      expect([item.key, isInteractiveBlock(item.payload.steps[0]!.blocks[0]!)]).toEqual([item.key, false]);
+      expect([item.key, blocks.some((b) => b.type === 'video')]).toEqual([item.key, true]);
+    }
   });
 
   it('never delivers answers, feedback or outcomes to learners', () => {
