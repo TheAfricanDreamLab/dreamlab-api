@@ -27,6 +27,13 @@ export default async function globalSetup(): Promise<void> {
   // One node owns every slot, so plain (non-cluster) clients keep working.
   const slots = await redis.exec(['redis-cli', 'cluster', 'addslotsrange', '0', '16383']);
   if (slots.exitCode !== 0 || !slots.output.includes('OK')) throw new Error(`Redis cluster setup failed: ${slots.output}`);
+  // Slots are assigned at once, but the cluster only serves commands once its state turns ok.
+  for (let i = 0; ; i++) {
+    const info = await redis.exec(['redis-cli', 'cluster', 'info']);
+    if (info.output.includes('cluster_state:ok')) break;
+    if (i >= 100) throw new Error(`Redis cluster never became ready: ${info.output}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
   const pg = (user: string, db = 'dreamlab_iam') => `postgres://${user}:${user}@${postgres.getHost()}:${postgres.getPort()}/${db}`;
   Object.assign(process.env, {
