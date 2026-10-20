@@ -163,13 +163,13 @@ describe('contract parity', () => {
 });
 
 describe('catalog', () => {
-  it('lists the featured Problem Solving course first, the others as coming soon', async () => {
+  it('lists the featured Problem Solving course first, and every Dream Lab course open for enrolment', async () => {
     const res = await request(catalog, 'GET', '/v1/catalog/courses');
     expect(res.status).toBe(200);
     const items = (res.body as { items: { slug: string; featured: boolean; availability: string; programs: { slug: string }[] }[] }).items;
     expect(items[0]).toMatchObject({ slug: 'problem-solving', featured: true, availability: 'available', programs: [{ slug: 'the-african-dream-lab' }] });
     expect(items).toHaveLength(13);
-    expect(items.filter((i) => i.availability === 'coming_soon')).toHaveLength(12);
+    expect(items.filter((i) => i.availability !== 'available').map((i) => i.slug)).toEqual([]);
     const search = await request(catalog, 'GET', '/v1/catalog/courses?q=negotiat');
     expect((search.body as { items: { slug: string }[] }).items.map((i) => i.slug)).toEqual(['negotiation']);
   });
@@ -219,7 +219,10 @@ describe('learning journey', () => {
     expect(enrollment).toMatchObject({ courseSlug: 'problem-solving', contextOrgId: null, status: 'active', progressPct: 0 });
     const again = await request(learning, 'POST', '/v1/learning/enrollments', { ...L(amina), body: { courseSlug: 'problem-solving' } });
     expect((again.body as Enrollment).id).toBe(enrollment.id);
-    const soon = await request(learning, 'POST', '/v1/learning/enrollments', { ...L(amina), body: { courseSlug: 'negotiation' } });
+    // A course with an outline but no content yet cannot be joined.
+    const seed = catalog.get(CatalogSeedService);
+    await seed.importCourse({ ...course, slug: 'coming-soon-test', title: 'Coming soon (test)', modules: undefined }, await seed.resolveOwner('platform'));
+    const soon = await request(learning, 'POST', '/v1/learning/enrollments', { ...L(amina), body: { courseSlug: 'coming-soon-test' } });
     expect(soon).toMatchObject({ status: 409, body: { code: 'course_not_open' } });
   });
 

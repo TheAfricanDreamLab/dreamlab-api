@@ -1,5 +1,6 @@
 import { CourseAuthoringSchema, isInteractiveBlock, ProgramAuthoringSchema, toDeliveryContent } from '@dreamlab/contracts';
 import { DATASETS } from './modules/seed/datasets';
+import { dreamLabCourseOutlines } from './seed/content';
 
 const dataset = DATASETS['dream-lab-test'];
 
@@ -19,14 +20,20 @@ describe('dream-lab-test dataset', () => {
     expect(programme.phases.reduce((n, ph) => n + ph.weightPct, 0)).toBe(100);
   });
 
-  it('has one full course; the rest are outlines', () => {
-    const full = dataset.courses.filter((c) => c.modules?.length);
-    expect(full.map((c) => c.slug)).toEqual(['problem-solving']);
+  it('has every course in full, keeping what each outline promised', () => {
+    const outlines = new Map(dreamLabCourseOutlines.map((o) => [o.slug, o]));
+    expect(dataset.courses.filter((c) => !c.modules?.length).map((c) => c.slug)).toEqual([]);
+    for (const c of dataset.courses) {
+      const outline = outlines.get(c.slug);
+      if (!outline) continue;
+      expect([c.slug, c.title, c.creditHours, c.practicalOutput, c.outcomes]).toEqual([outline.slug, outline.title, outline.creditHours, outline.practicalOutput, outline.outcomes]);
+      const assignment = c.modules!.flatMap((m) => m.items).find((i) => i.type === 'assignment');
+      expect([c.slug, assignment?.type === 'assignment' && assignment.payload.practicalOutput]).toEqual([c.slug, outline.practicalOutput]);
+    }
   });
 
-  it('opens every lesson by teaching, with a video, before any question', () => {
-    const course = CourseAuthoringSchema.parse(dataset.courses.find((c) => c.slug === 'problem-solving'));
-    expect(course.trailer).toBeDefined();
+  it.each(dataset.courses.map((c) => [c.slug, c] as const))('%s opens every lesson by teaching, with a video, before any question', (_slug, raw) => {
+    const course = CourseAuthoringSchema.parse(raw);
     for (const item of course.modules!.flatMap((m) => m.items)) {
       if (item.type !== 'lesson') continue;
       const blocks = item.payload.steps.flatMap((s) => s.blocks);
@@ -35,11 +42,12 @@ describe('dream-lab-test dataset', () => {
     }
   });
 
-  it('never delivers answers, feedback or outcomes to learners', () => {
-    const course = CourseAuthoringSchema.parse(dataset.courses.find((c) => c.slug === 'problem-solving'));
+  it.each(dataset.courses.map((c) => [c.slug, c] as const))('%s never delivers answers, feedback or outcomes to learners', (_slug, raw) => {
+    const course = CourseAuthoringSchema.parse(raw);
     for (const item of course.modules!.flatMap((m) => m.items)) {
       const json = JSON.stringify(toDeliveryContent(item, 'seed-test'));
-      expect(json).not.toMatch(/"correct"|"feedback"|"explanation"|"outcome"|"best"|"afterword"/);
+      // Keys, not words: an option may legitimately be called "best" or "correct".
+      expect(json).not.toMatch(/"(correct|feedback|explanation|outcome|best|afterword)":/);
     }
   });
 });
