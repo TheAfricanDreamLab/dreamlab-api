@@ -178,6 +178,7 @@ describe('catalog', () => {
     const res = await request(catalog, 'GET', '/v1/catalog/courses/problem-solving');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ slug: 'problem-solving', versionNo: 1, availability: 'available' });
+    expect(res.body).toMatchObject({ trailer: { provider: 'youtube', videoId: expect.stringMatching(/^[\w-]{11}$/) }, cover: { imageUrl: expect.stringMatching(/^https:\/\//) } });
     expect(JSON.stringify(res.body)).not.toMatch(/"steps"|"correct"|"payload"/);
     expect((await request(catalog, 'GET', '/v1/catalog/courses/no-such-course')).status).toBe(404);
   });

@@ -89,6 +89,7 @@ export class CatalogSeedService {
         prerequisites: c.prerequisites,
         practicalOutput: c.practicalOutput,
         cover: c.cover,
+        trailer: c.trailer ?? null,
         instructors: c.instructors,
       };
       let [row] = await tx.select().from(courses).where(eq(courses.slug, c.slug));

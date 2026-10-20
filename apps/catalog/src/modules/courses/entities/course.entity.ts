@@ -1,4 +1,4 @@
-import type { CourseAuthoring } from '@dreamlab/contracts';
+import type { CourseAuthoring, VideoRef } from '@dreamlab/contracts';
 import { timestamps } from '@lib/database';
 import { jsonb, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -24,6 +24,8 @@ export const courses = pgTable(
     prerequisites: text('prerequisites').notNull(),
     practicalOutput: text('practical_output'),
     cover: jsonb('cover').$type<CourseAuthoring['cover']>().notNull(),
+    /** A short introduction video, shown on the course page and course home. */
+    trailer: jsonb('trailer').$type<VideoRef>(),
     /** Display details of the teaching team (course_staff will link user accounts). */
     instructors: jsonb('instructors').$type<CourseAuthoring['instructors']>().notNull().default([]),
     /** The published version learners enrol in; null while the course is coming soon. */

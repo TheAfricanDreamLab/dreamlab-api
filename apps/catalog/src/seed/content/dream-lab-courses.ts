@@ -33,7 +33,21 @@ const criticalThinking: CourseAuthoring = {
   audience: 'Young builders and changemakers, roughly 18 to 30, who want to think more clearly, resist misinformation and make sound judgements about people, ideas and opportunities.',
   prerequisites: 'None. Taken alongside Problem Solving in the first weeks of the Lab.',
   practicalOutput: 'Argument Audit',
-  cover: { from: '#0A0F1E', to: '#2B4C7E', symbol: '◇' },
+  cover: {
+    from: '#0A0F1E',
+    to: '#2B4C7E',
+    symbol: '◇',
+    imageUrl: "https://images.unsplash.com/photo-1622295023876-0cdf583c41f6?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A young man smiles as he reads a book at a desk, beside an open laptop and a desk lamp.",
+    imageCredit: "Photo: Emmanuel Ikwuegbu / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'dItUGF8GdTw',
+    title: "5 tips to improve your critical thinking - Samantha Agoos",
+    channel: "TED-Ed",
+    durationS: 270,
+  },
   instructors: [],
 };
 
@@ -59,7 +73,21 @@ const emotionalIntelligence: CourseAuthoring = {
   audience: 'Anyone in the Lab who wants stronger relationships, steadier leadership and better ways to cope with pressure, at work, in ventures and at home.',
   prerequisites: 'None.',
   practicalOutput: 'Emotional Intelligence Growth Plan',
-  cover: { from: '#123B2F', to: '#3CB795', symbol: '●' },
+  cover: {
+    from: '#123B2F',
+    to: '#3CB795',
+    symbol: '●',
+    imageUrl: "https://images.unsplash.com/photo-1700687530335-b71cd1d926ee?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A group of young adults sit in a circle of chairs, talking animatedly and laughing together.",
+    imageCredit: "Photo: Ben Iwara / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: '1Evwgu369Jw',
+    title: "Brené Brown on Empathy",
+    channel: "Royal Society of Arts",
+    durationS: 173,
+  },
   instructors: [],
 };
 
@@ -85,7 +113,21 @@ const characterAndEthics: CourseAuthoring = {
   audience: 'Young leaders and founders who want their success to rest on character they are proud of, and who expect to face real ethical pressure in their careers.',
   prerequisites: 'None.',
   practicalOutput: 'Personal Values Charter',
-  cover: { from: '#3A2A0E', to: '#D8A84E', symbol: '▲' },
+  cover: {
+    from: '#3A2A0E',
+    to: '#D8A84E',
+    symbol: '▲',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Umuganda.jpg/1280px-Umuganda.jpg",
+    imageAlt: "A group of people work a field together with hoes during a community work day, with buildings and trees behind them.",
+    imageCredit: "Photo: Masako Kato / Wikimedia Commons, CC BY-SA 4.0",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'OI-G23HF6Sw',
+    title: "Ethical dilemma: Would you lie? - Sarah Stroud",
+    channel: "TED-Ed",
+    durationS: 260,
+  },
   instructors: [],
 };
 
@@ -111,7 +153,21 @@ const systemsThinking: CourseAuthoring = {
   audience: 'Learners who want to tackle complex, stubborn problems in communities, ventures or public services, and who have begun defining a problem in Problem Solving.',
   prerequisites: 'Problem Solving recommended, ideally completed first.',
   practicalOutput: 'System Map and Leverage Brief',
-  cover: { from: '#0A2A3D', to: '#2E8C9E', symbol: '◈' },
+  cover: {
+    from: '#0A2A3D',
+    to: '#2E8C9E',
+    symbol: '◈',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Aerial_view_of_a_busy_tomato_market_in_Lagos_Nigeria.jpg/1280px-Aerial_view_of_a_busy_tomato_market_in_Lagos_Nigeria.jpg",
+    imageAlt: "An aerial view of a large open-air market where hundreds of baskets and crates of red tomatoes are spread across the ground among crowds of traders.",
+    imageCredit: "Photo: Ayorinde Ogundele / Wikimedia Commons, CC BY-SA 4.0",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'A_BtS008J0k',
+    title: "In A World of Systems",
+    channel: "Donella Meadows",
+    durationS: 563,
+  },
   instructors: [],
 };
 
@@ -139,7 +195,21 @@ const communication: CourseAuthoring = {
   audience: 'Builders who need to pitch, lead, persuade and explain, and anyone who freezes, rambles or goes unheard when it matters.',
   prerequisites: 'Completion of the Life Architecture phase, or equivalent experience.',
   practicalOutput: 'Signature Talk',
-  cover: { from: '#0A0F1E', to: '#D8A84E', symbol: '○' },
+  cover: {
+    from: '#0A0F1E',
+    to: '#D8A84E',
+    symbol: '○',
+    imageUrl: "https://images.unsplash.com/photo-1581548708095-7158f2e63857?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A close-up of a microphone on a stand against a soft, blurred background.",
+    imageCredit: "Photo: Robinson Recalde / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'eIho2S0ZahI',
+    title: "How to Speak So That People Want to Listen | Julian Treasure | TED",
+    channel: "TED",
+    durationS: 598,
+  },
   instructors: [],
 };
 
@@ -165,7 +235,21 @@ const negotiation: CourseAuthoring = {
   audience: 'Founders, freelancers, employees and community leaders who want to get fairer deals without damaging relationships.',
   prerequisites: 'Communication recommended.',
   practicalOutput: 'Negotiation Plan and Debrief',
-  cover: { from: '#2A1A3D', to: '#7B5EA7', symbol: '◐' },
+  cover: {
+    from: '#2A1A3D',
+    to: '#7B5EA7',
+    symbol: '◐',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Makola_Market_Entrance%2C_Accra%2C_Ghana.JPG/1280px-Makola_Market_Entrance%2C_Accra%2C_Ghana.JPG",
+    imageAlt: "Traders and shoppers crowd the street in front of a yellow building with a large sign reading Welcome to Makola Market.",
+    imageCredit: "Photo: Benggriff / Wikimedia Commons, CC BY-SA 3.0",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: '4HzZXoOPObg',
+    title: "What the Best Negotiators Do Differently",
+    channel: "Harvard Business Review",
+    durationS: 69,
+  },
   instructors: [],
 };
 
@@ -191,7 +275,14 @@ const financialIntelligence: CourseAuthoring = {
   audience: 'Young builders who want control over their money and need to understand the numbers behind a venture or project.',
   prerequisites: 'Basic arithmetic. No accounting background needed.',
   practicalOutput: 'Personal and Venture Financial Plan',
-  cover: { from: '#1E3A12', to: '#8DB33A', symbol: '■' },
+  cover: {
+    from: '#1E3A12',
+    to: '#8DB33A',
+    symbol: '■',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Naira_notes_%2876252%29.jpg/1280px-Naira_notes_%2876252%29.jpg",
+    imageAlt: "The front and back of a Nigerian two-hundred-naira banknote laid on paper.",
+    imageCredit: "Photo: FAdelabu / Wikimedia Commons, CC BY-SA 4.0",
+  },
   instructors: [],
 };
 
@@ -217,7 +308,21 @@ const personalBranding: CourseAuthoring = {
   audience: 'Learners who want to be visible to employers, investors, collaborators and communities, without feeling fake.',
   prerequisites: 'Character Formation and Ethics and Communication recommended.',
   practicalOutput: 'Personal Brand Kit',
-  cover: { from: '#3D0A1E', to: '#C2456B', symbol: '★' },
+  cover: {
+    from: '#3D0A1E',
+    to: '#C2456B',
+    symbol: '★',
+    imageUrl: "https://images.unsplash.com/photo-1739271933163-8dcc7c8e8a3e?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A smiling young woman with long braids looks down at her phone, one hand on her chest.",
+    imageCredit: "Photo: Ninthgrid / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'ozMCb0wOnMU',
+    title: "5 Steps to Building a Personal Brand You Feel Good About | The Way We Work, a TED series",
+    channel: "TED",
+    durationS: 374,
+  },
   instructors: [],
 };
 
@@ -243,7 +348,21 @@ const collaboration: CourseAuthoring = {
   audience: 'Every Lab learner, especially those who will lead or join a team in the Dream Residency.',
   prerequisites: 'Emotional Intelligence and Communication recommended.',
   practicalOutput: 'Team Charter',
-  cover: { from: '#0F2E1A', to: '#4FA86A', symbol: '✦' },
+  cover: {
+    from: '#0F2E1A',
+    to: '#4FA86A',
+    symbol: '✦',
+    imageUrl: "https://images.unsplash.com/photo-1653566031535-bcf33e1c2893?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "Three young men talk around a meeting table with laptops and a tablet, one listening thoughtfully with his hand to his chin.",
+    imageCredit: "Photo: UK Black Tech / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: '3boKz0Exros',
+    title: "How to turn a group of strangers into a team | Amy Edmondson",
+    channel: "TED",
+    durationS: 787,
+  },
   instructors: [],
 };
 
@@ -271,7 +390,21 @@ const contentCreation: CourseAuthoring = {
   audience: 'Learners who want to build an audience for a venture, cause or creative career, or work in media and communications.',
   prerequisites: "Builder’s Architecture phase, especially Communication and Personal Branding. A smartphone with a camera.",
   practicalOutput: 'Content Portfolio and 30-Day Calendar',
-  cover: { from: '#3D1A0A', to: '#E07B39', symbol: '▶' },
+  cover: {
+    from: '#3D1A0A',
+    to: '#E07B39',
+    symbol: '▶',
+    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Ekanty_visual_at_work.jpg/1280px-Ekanty_visual_at_work.jpg",
+    imageAlt: "A young man films an event with a camera on a tripod while a speaker talks at a lectern in the background.",
+    imageCredit: "Photo: Pacesetter Media / Wikimedia Commons, CC BY-SA 4.0",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'ZmNpeXTj2c4',
+    title: "The Secret to Telling a Great Story — in Less Than 60 Seconds | Jenny Hoyos | TED",
+    channel: "TED",
+    durationS: 240,
+  },
   instructors: [],
 };
 
@@ -297,7 +430,21 @@ const artificialIntelligence: CourseAuthoring = {
   audience: 'Learners curious about technology who want to use AI to solve problems, whatever their background.',
   prerequisites: "Builder’s Architecture phase. A smartphone or computer with internet access; no coding required.",
   practicalOutput: 'AI-Assisted Solution Prototype',
-  cover: { from: '#0A0F1E', to: '#3CB795', symbol: '⬡' },
+  cover: {
+    from: '#0A0F1E',
+    to: '#3CB795',
+    symbol: '⬡',
+    imageUrl: "https://images.unsplash.com/photo-1694175271713-a6e2cc378980?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A young man in a hoodie leans against a wall typing on a laptop held in one hand, a bag in a bright African print over his shoulder.",
+    imageCredit: "Photo: Seth Ebenezer Tetteh / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: '0yCJMt9Mx9c',
+    title: "How does artificial intelligence learn? - Briana Brownell",
+    channel: "TED-Ed",
+    durationS: 297,
+  },
   instructors: [],
 };
 
@@ -323,7 +470,21 @@ const digitalMarketing: CourseAuthoring = {
   audience: 'Founders, freelancers and changemakers who need customers, supporters or members, and anyone interested in a marketing career.',
   prerequisites: "Builder’s Architecture phase, especially Communication and Personal Branding.",
   practicalOutput: 'Digital Marketing Campaign Plan and Results Report',
-  cover: { from: '#0A1E3D', to: '#4E7FD8', symbol: '◎' },
+  cover: {
+    from: '#0A1E3D',
+    to: '#4E7FD8',
+    symbol: '◎',
+    imageUrl: "https://images.unsplash.com/photo-1634313946117-25462979f178?auto=format&fit=crop&w=1200&q=70",
+    imageAlt: "A young man looks down at his smartphone, with a laptop showing a grid of videos on the desk behind him.",
+    imageCredit: "Photo: Oyemike Princewill / Unsplash",
+  },
+  trailer: {
+    provider: 'youtube',
+    videoId: 'XDpwDwcXGoU',
+    title: "What is Digital Marketing: Tutorial for Beginners",
+    channel: "HubSpot Marketing",
+    durationS: 138,
+  },
   instructors: [],
 };
 
