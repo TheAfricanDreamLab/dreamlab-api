@@ -93,7 +93,7 @@ const moduleTeams: Module = {
                 id: 'baobab-reveal',
                 type: 'reveal',
                 prompt: 'Before you read on: predict two things that are likely to go wrong for Team Baobab in the next month.',
-                body: "Some likely trouble:\n\n- **Kwame and Wanjiru dominate**, while Uwase’s best ideas go unsaid.\n- **Chidi misses deadlines** because of his day job, and nobody knows whether to wait for him.\n- **Decisions stall** because nobody agreed how decisions get made.\n- **Messages pile up** across three time zones and four WhatsApp groups.\n\nNone of this means they are a bad team. It means they are a normal one. This course is about preventing these problems, and handling them early when they appear.",
+                body: "Some likely trouble:\n\n- **Kwame and Wanjiru dominate**, while Uwase’s best ideas go unsaid.\n- **Chidi misses deadlines** because of his day job, and nobody knows whether to wait for him.\n- **Decisions stall** because nobody agreed how decisions get made.\n- **Messages pile up** across four time zones and four WhatsApp groups.\n\nNone of this means they are a bad team. It means they are a normal one. This course is about preventing these problems, and handling them early when they appear.",
               },
             ],
           },
@@ -620,7 +620,7 @@ const moduleWorking: Module = {
               {
                 id: 'distance-text',
                 type: 'text',
-                body: "Team Baobab works across four countries and three time zones. Many of your teams will too: across cities, campuses or the continent.\n\nDistance removes the small signals we rely on in person: a tone of voice, a nod, a quick question over a desk. Messages are read in the wrong mood, silence is mistaken for disagreement, and urgent things get buried under chat.\n\nThis short explainer from Harvard Business Review, made when many teams suddenly went remote, explains what changes and how to adapt.",
+                body: "Team Baobab works across four countries and four time zones. Many of your teams will too: across cities, campuses or the continent.\n\nDistance removes the small signals we rely on in person: a tone of voice, a nod, a quick question over a desk. Messages are read in the wrong mood, silence is mistaken for disagreement, and urgent things get buried under chat.\n\nThis short explainer from Harvard Business Review, made when many teams suddenly went remote, explains what changes and how to adapt.",
               },
               {
                 id: 'distance-video',
@@ -653,7 +653,7 @@ const moduleWorking: Module = {
           },
           {
             id: 'time-zones',
-            title: 'Three time zones',
+            title: 'Four time zones',
             blocks: [
               {
                 id: 'time-zones-text',
