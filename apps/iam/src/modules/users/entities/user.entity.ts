@@ -17,6 +17,11 @@ export const users = pgTable(
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     /** Incremented whenever the user's memberships or roles change; tokens carry it as `azv`. */
     authzVersion: integer('authz_version').notNull().default(0),
+    /**
+     * The context the person last worked in (an organisation, or null for "just me"). Signing in on
+     * the main site returns them there, so members don't land in their personal space every time.
+     */
+    lastOrgId: uuid('last_org_id'),
     /** Authenticator app (IAM-19): TOTP secret, AES-256-GCM with IAM_KEY_ENCRYPTION_SECRET. */
     mfaSecretEncrypted: text('mfa_secret_encrypted'),
     mfaEnabledAt: timestamp('mfa_enabled_at', { withTimezone: true }),

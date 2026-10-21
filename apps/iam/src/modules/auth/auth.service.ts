@@ -210,6 +210,7 @@ export class AuthService {
     }
     return this.db.system(async (tx) => {
       await this.sessions.touch(tx, session.id, { activeOrgId: context.orgId, activeMembershipId: context.membershipId });
+      await this.issuer.rememberContext(tx, principal.userId, context.orgId);
       return this.issuer.tokenResponse(session, context);
     });
   }

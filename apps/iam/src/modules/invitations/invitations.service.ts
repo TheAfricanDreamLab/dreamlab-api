@@ -169,7 +169,7 @@ export class InvitationsService {
 
   /** The signed-in user's verified email or phone must match the invitation. */
   /** What the invitee sees before signing in. Anyone holding the token may look; nothing changes. */
-  async preview(token: string) {
+  async preview(token: string, principal: Principal | null = null) {
     const [row] = await this.db.sys
       .select({ inv: invitations, org: organizations, inviter: users.fullName })
       .from(invitations)
@@ -184,6 +184,15 @@ export class InvitationsService {
     const destination = (row.inv.email ?? row.inv.phone)!;
     const channel = channelFor(destination);
     const view = toInvitation(row.inv);
+    const invitee = await this.users.findByEmailOrPhone(row.inv.email, row.inv.phone);
+    let matchesSignedInUser: boolean | null = null;
+    if (principal) {
+      const me = await this.users.findById(principal.userId);
+      matchesSignedInUser =
+        !!me &&
+        ((row.inv.email !== null && me.email !== null && me.email.toLowerCase() === row.inv.email.toLowerCase() && me.emailVerifiedAt !== null) ||
+          (row.inv.phone !== null && me.phone === row.inv.phone && me.phoneVerifiedAt !== null));
+    }
     return {
       organization: { name: row.org.name, slug: row.org.slug, kinds: row.org.kinds as never, status: row.org.status },
       roles: roleRows.map((r) => ({ key: r.key, name: r.name, permissions: r.permissions as never })),
@@ -192,6 +201,8 @@ export class InvitationsService {
       destination: maskDestination(channel, destination),
       status: view.status,
       expiresAt: view.expiresAt,
+      accountExists: invitee !== null && invitee.status !== 'deleted',
+      matchesSignedInUser,
     };
   }
 

@@ -193,12 +193,32 @@ describe('authentication', () => {
   });
 
   it('ignores tenant headers that did not come through the gateway', async () => {
+    await signUp('forged@example.com');
     const dreamlab = await orgId('dreamlab');
+    await grant('forged@example.com', dreamlab, 'student');
     const login = await request(app, 'POST', '/v1/auth/login', {
-      body: { identifier: 'member@example.com', password: 'correct horse battery' },
+      body: { identifier: 'forged@example.com', password: 'correct horse battery' },
       headers: { 'x-tenant-org-id': dreamlab },
     });
     expect(login.body).toMatchObject({ context: { orgId: null } });
+  });
+
+  it('signs in on the main site to where the person last worked, and remembers "just me"', async () => {
+    await signUp('returning@example.com');
+    const dreamlab = await orgId('dreamlab');
+    await grant('returning@example.com', dreamlab, 'student');
+    // They work in Dream Lab once, through its own site.
+    const viaSite = await request(app, 'POST', '/v1/auth/login', {
+      body: { identifier: 'returning@example.com', password: 'correct horse battery' },
+      headers: viaGateway(dreamlab),
+    });
+    expect(viaSite.body).toMatchObject({ context: { orgId: dreamlab } });
+    const back = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'returning@example.com', password: 'correct horse battery' } });
+    expect(back.body).toMatchObject({ context: { orgId: dreamlab } });
+    const personal = await request(app, 'POST', '/v1/auth/switch-org', { token: (back.body as { accessToken: string }).accessToken, body: { orgId: null } });
+    expect(personal.body).toMatchObject({ context: { orgId: null } });
+    const again = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'returning@example.com', password: 'correct horse battery' } });
+    expect(again.body).toMatchObject({ context: { orgId: null } });
   });
 
   it('refuses Google sign-in when no client ids are configured', async () => {
@@ -323,10 +343,15 @@ describe('directory', () => {
     expect(accepted.body).toMatchObject({ status: 'active', orgUnitId: sales.id });
     const leadMembership = (accepted.body as { id: string }).id;
 
+    // The invitation page can tell who it is for.
+    const invToken = notifier.lastInviteToken('lead@example.com')!;
+    expect((await request(app, 'POST', '/v1/invitations/preview', { body: { token: invToken } })).body).toMatchObject({ accountExists: true, matchesSignedInUser: null });
+    expect((await request(app, 'POST', '/v1/invitations/preview', { token: lead.accessToken, body: { token: invToken } })).body).toMatchObject({ matchesSignedInUser: true });
     // Someone else cannot use the same invitation.
     const stranger = await signUp('stranger@example.com');
     const stolen = await request(app, 'POST', '/v1/invitations/accept', { token: stranger.accessToken, body: { token: notifier.lastInviteToken('lead@example.com') } });
     expect(stolen.status).toBe(409);
+    expect((await request(app, 'POST', '/v1/invitations/preview', { token: stranger.accessToken, body: { token: invToken } })).body).toMatchObject({ matchesSignedInUser: false });
 
     await request(app, 'POST', `/v1/orgs/${corp}/members/${leadMembership}/roles`, {
       token: ownerToken,
