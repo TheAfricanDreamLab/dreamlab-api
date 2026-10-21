@@ -204,13 +204,20 @@ describe('authentication', () => {
   });
 
   it('signs in on the main site to where the person last worked, and remembers "just me"', async () => {
+    await signUp('returning@example.com');
     const dreamlab = await orgId('dreamlab');
-    // member@example.com last signed in through the Dream Lab site.
-    const back = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'member@example.com', password: 'correct horse battery' } });
+    await grant('returning@example.com', dreamlab, 'student');
+    // They work in Dream Lab once, through its own site.
+    const viaSite = await request(app, 'POST', '/v1/auth/login', {
+      body: { identifier: 'returning@example.com', password: 'correct horse battery' },
+      headers: viaGateway(dreamlab),
+    });
+    expect(viaSite.body).toMatchObject({ context: { orgId: dreamlab } });
+    const back = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'returning@example.com', password: 'correct horse battery' } });
     expect(back.body).toMatchObject({ context: { orgId: dreamlab } });
     const personal = await request(app, 'POST', '/v1/auth/switch-org', { token: (back.body as { accessToken: string }).accessToken, body: { orgId: null } });
     expect(personal.body).toMatchObject({ context: { orgId: null } });
-    const again = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'member@example.com', password: 'correct horse battery' } });
+    const again = await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'returning@example.com', password: 'correct horse battery' } });
     expect(again.body).toMatchObject({ context: { orgId: null } });
   });
 
