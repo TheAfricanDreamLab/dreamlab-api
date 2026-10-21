@@ -1,6 +1,6 @@
 import { HttpStatus, Logger } from '@nestjs/common';
 import { ClientProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
-import type { CourseAuthoring, CourseDetail, CourseSummary, ItemAuthoring, ItemType } from '@dreamlab/contracts';
+import type { CourseAuthoring, CourseDetail, CourseSummary, ItemAuthoring, ItemType, ProgramDetail } from '@dreamlab/contracts';
 import { AppException } from '@lib/common';
 import { firstValueFrom, timeout } from 'rxjs';
 
@@ -21,6 +21,8 @@ export const CatalogRpc = {
   CourseSummaries: 'catalog.course.summaries',
   /** { slug, viewer } → CourseDetail | null, as that viewer may see it. */
   CourseDetail: 'catalog.course.detail',
+  /** { slug } → ProgramDetail | null: phases, courses, elective groups and the template calendar. */
+  ProgramDetail: 'catalog.program.detail',
 } as const;
 
 export const IamRpc = {
@@ -28,6 +30,8 @@ export const IamRpc = {
   UserNames: 'iam.users.names',
   /** { slug } → { id, slug, name } | null */
   ResolveOrg: 'iam.orgs.resolve',
+  /** { ids } → { id, name }[] */
+  OrgNames: 'iam.orgs.names',
 } as const;
 
 export interface ContentItemRef {
@@ -121,6 +125,10 @@ export class CatalogClient {
     const content = await this.rpc.send<CourseContent | null>(CatalogRpc.VersionContent, { versionId });
     if (content) this.remember(content);
     return content;
+  }
+
+  program(slug: string): Promise<ProgramDetail | null> {
+    return this.rpc.send<ProgramDetail | null>(CatalogRpc.ProgramDetail, { slug });
   }
 
   detail(slug: string, viewer: Viewer): Promise<CourseDetail | null> {

@@ -169,6 +169,11 @@ export class OrganizationsService {
   }
 
   /** Public tenant lookup by subdomain slug. Only active organisations resolve. */
+  async names(ids: string[]): Promise<{ id: string; name: string }[]> {
+    if (ids.length === 0) return [];
+    return this.db.sys.select({ id: organizations.id, name: organizations.name }).from(organizations).where(inArray(organizations.id, ids));
+  }
+
   async resolve(slug: string) {
     const [org] = await this.db.sys
       .select()
