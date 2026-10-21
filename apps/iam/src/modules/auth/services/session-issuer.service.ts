@@ -53,9 +53,22 @@ export class SessionIssuer {
     // Every sign-in path (password, codes, Google, SSO, MFA) ends here: suspended people get no session.
     const [account] = await tx.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, user.id));
     if (account?.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
-    const context = await this.resolveContext(user.id, options.orgId !== undefined ? options.orgId : meta.tenantOrgId);
+    // Asked for (switch, SSO) > the organisation's own site > where the person last worked.
+    const preferred = options.orgId !== undefined ? options.orgId : (meta.tenantOrgId ?? (await this.lastOrg(tx, user.id)));
+    const context = await this.resolveContext(user.id, preferred);
+    await this.rememberContext(tx, user.id, context.orgId);
     const session = await this.sessions.create(tx, user.id, method, context, meta, options.mfa ?? false);
     return this.tokenResponse(session, context);
+  }
+
+  private async lastOrg(tx: IamTx, userId: string): Promise<string | null> {
+    const [row] = await tx.select({ lastOrgId: schema.users.lastOrgId }).from(schema.users).where(eq(schema.users.id, userId));
+    return row?.lastOrgId ?? null;
+  }
+
+  /** Remember the context a person chose, so their next sign-in starts there. */
+  async rememberContext(tx: IamTx, userId: string, orgId: string | null): Promise<void> {
+    await tx.update(schema.users).set({ lastOrgId: orgId }).where(eq(schema.users.id, userId));
   }
 
   async resolveContext(userId: string, preferredOrgId: string | null): Promise<TokenContext> {

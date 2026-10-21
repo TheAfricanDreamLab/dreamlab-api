@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { apiV1Contract } from '@dreamlab/contracts';
-import { Authenticated, CurrentPrincipal, Principal, Public, RequirePermission } from '@lib/auth';
+import { Authenticated, CurrentPrincipal, OptionalPrincipal, Principal, Public, RequirePermission } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { Meta } from '../../common/decorators/request-meta.decorator';
 import type { RequestMeta } from '../../common/interfaces/request-meta.interface';
@@ -56,8 +56,8 @@ export class InvitationsController {
   @HttpCode(200)
   @ApiOperation({ summary: r.preview.summary })
   @ZodResponse({ status: 200, type: InvitationPreviewDto })
-  preview(@Body() dto: AcceptInvitationDto) {
-    return this.invitations.preview(dto.token);
+  preview(@Body() dto: AcceptInvitationDto, @OptionalPrincipal() principal: Principal | null) {
+    return this.invitations.preview(dto.token, principal);
   }
 
   @Post('invitations/accept')
