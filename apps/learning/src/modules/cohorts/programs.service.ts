@@ -64,14 +64,15 @@ export class ProgramsService {
     }
 
     const enrollmentId = await this.db.tenant(hostCtx(p, cohort), async (tx) => {
+      // Locks the cohort first, so concurrent joins (the same person twice, or two people for the
+      // last place) run one after the other and each sees what the other committed.
+      const [locked] = await tx.select().from(cohorts).where(eq(cohorts.id, cohort.id)).for('update');
       const [existing] = await tx
         .select()
         .from(programEnrollments)
         .where(and(eq(programEnrollments.cohortId, cohort.id), eq(programEnrollments.userId, p.userId)));
       if (existing && existing.status !== 'withdrawn') return existing.id;
 
-      // Locks the cohort so two people can't both take its last place.
-      const [locked] = await tx.select().from(cohorts).where(eq(cohorts.id, cohort.id)).for('update');
       if (!locked || !(JOINABLE as readonly string[]).includes(locked.status)) throw conflict('cohort_not_open', 'This cohort isn’t taking learners.');
       const learners = (await learnerCounts(this.db, [cohort.id])).get(cohort.id) ?? 0;
       if (locked.capacity !== null && learners >= locked.capacity) throw conflict('cohort_full', 'This cohort is full.');
