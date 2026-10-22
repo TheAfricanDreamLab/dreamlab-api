@@ -407,8 +407,8 @@ describe('cohorts (LRN-2)', () => {
     expect(org.status).toBe(201);
     hostOrgId = (org.body as { id: string }).id;
     host = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId: hostOrgId } })).body as { accessToken: string }).accessToken;
-    ada = await signUp('ada@example.com', 'Ada Obi');
-    tunde = await signUp('tunde@example.com', 'Tunde Bakare');
+    ada = await signUp('ada.obi@cohort.test', 'Ada Obi');
+    tunde = await signUp('tunde.bakare@cohort.test', 'Tunde Bakare');
   });
 
   it('schedules a cohort: dated calendar, a run per course and the weekly classes', async () => {
