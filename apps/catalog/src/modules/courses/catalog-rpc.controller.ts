@@ -3,6 +3,7 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import type { Principal } from '@lib/auth';
 import { CatalogRpc } from '@lib/rpc';
 import { z } from 'zod';
+import { ProgramsService } from '../programs/programs.service';
 import { CatalogReadService } from './catalog-read.service';
 
 const SlugPayload = z.object({ slug: z.string().min(1).max(80) });
@@ -13,7 +14,16 @@ const DetailPayload = SlugPayload.extend({ viewer: z.object({ orgId: z.string().
 /** RabbitMQ RPC for the learning service: course content (answers included) and summaries. */
 @Controller()
 export class CatalogRpcController {
-  constructor(private readonly catalog: CatalogReadService) {}
+  constructor(
+    private readonly catalog: CatalogReadService,
+    private readonly programs: ProgramsService,
+  ) {}
+
+  @MessagePattern(CatalogRpc.ProgramDetail)
+  program(@Payload() payload: unknown) {
+    const p = SlugPayload.safeParse(payload);
+    return p.success ? this.programs.get(p.data.slug, null).catch(() => null) : null;
+  }
 
   @MessagePattern(CatalogRpc.CourseContent)
   courseContent(@Payload() payload: unknown) {
