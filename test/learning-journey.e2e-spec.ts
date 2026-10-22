@@ -11,12 +11,14 @@ import {
   apiV1Contract,
   BlockAuthoring,
   BlockResponse,
+  CohortDetail,
   CourseAuthoringSchema,
   CourseProgress,
   Enrollment,
   ItemAuthoring,
   ItemView,
   isInteractiveBlock,
+  MyProgram,
 } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE } from '@lib/auth';
 import { buildOpenApiDocument, installGatewayTrust, REDIS } from '@lib/common';
@@ -40,6 +42,7 @@ import { SeedService } from '../apps/iam/src/modules/seed/seed.service';
 import { LearningAppModule } from '../apps/learning/src/app.module';
 import { learningConfigSchema } from '../apps/learning/src/config';
 import { learningMigrationsFolder } from '../apps/learning/src/database';
+import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
 
 class CapturingNotifier implements Notifier {
   otps: OtpMessage[] = [];
@@ -153,6 +156,7 @@ describe('contract parity', () => {
   it.each([
     ['catalog', () => catalog, apiV1Contract.catalog],
     ['learning', () => learning, apiV1Contract.learning],
+    ['learning (cohorts)', () => learning, apiV1Contract.cohorts],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -382,5 +386,126 @@ describe('learning journey', () => {
       expect(aminaView.course.versionNo).toBe(1);
       expect(aminaView.enrollment!.versionId).toBe(enrollment.versionId);
     });
+  });
+});
+
+describe('cohorts (LRN-2)', () => {
+  let host: string;
+  let ada: string;
+  let tunde: string;
+  let hostOrgId: string;
+  let cohort: CohortDetail;
+
+  beforeAll(async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const personal = await signUp('host@lagos-hub.test', 'Halima Host');
+    const org = await request(iam, 'POST', '/v1/orgs', {
+      token: admin,
+      body: { slug: 'lagos-hub', name: 'Lagos Hub', kinds: ['enterprise'], firstAdmin: { email: 'host@lagos-hub.test' } },
+    });
+    expect(org.status).toBe(201);
+    hostOrgId = (org.body as { id: string }).id;
+    host = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId: hostOrgId } })).body as { accessToken: string }).accessToken;
+    ada = await signUp('ada@example.com', 'Ada Obi');
+    tunde = await signUp('tunde@example.com', 'Tunde Bakare');
+  });
+
+  it('schedules a cohort: dated calendar, a run per course and the weekly classes', async () => {
+    const body = { programSlug: 'the-african-dream-lab', name: 'Cohort 01', startsOn: todayIn('Africa/Lagos') };
+    expect((await request(learning, 'POST', '/v1/learning/cohorts', { ...L(ada), body })).status).toBe(403);
+    const res = await request(learning, 'POST', '/v1/learning/cohorts', { ...L(host), body });
+    expect(res.status).toBe(201);
+    cohort = res.body as CohortDetail;
+    expect(cohort).toMatchObject({ name: 'Cohort 01', hostOrgName: 'Lagos Hub', status: 'draft', enrollmentPolicy: 'invite', timeZone: 'Africa/Lagos', currentWeek: 1, learnerCount: 0 });
+    expect(cohort.calendar).toHaveLength(15);
+    expect(cohort.calendar[0]).toMatchObject({ weekNo: 1, startsOn: body.startsOn });
+    expect(cohort.sessions).toHaveLength(45);
+    expect(cohort.rhythm).toHaveLength(3);
+    const bad = await request(learning, 'POST', '/v1/learning/cohorts', { ...L(host), body: { ...body, timeZone: 'Mars/Olympus' } });
+    expect(bad).toMatchObject({ status: 400, body: { code: 'invalid_time_zone' } });
+    expect(((await request(learning, 'GET', '/v1/learning/cohorts', L(host))).body as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('shows learners only the intakes they may join', async () => {
+    const list = (token?: string) =>
+      request(learning, 'GET', '/v1/learning/programs/the-african-dream-lab/cohorts', token ? L(token) : {}).then((r) => (r.body as { items: { id: string }[] }).items.map((c) => c.id));
+    expect(await list(ada)).toEqual([]);
+    expect(await list(host)).toEqual([cohort.id]);
+    expect((await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(ada), body: {} })).status).toBe(404);
+
+    const opened = await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { status: 'open', enrollmentPolicy: 'open', capacity: 1 } });
+    expect(opened.body).toMatchObject({ status: 'open', enrollmentPolicy: 'open', capacity: 1 });
+    expect(await list()).toEqual([cohort.id]);
+    expect(await list(ada)).toEqual([cohort.id]);
+  });
+
+  it('joins a cohort: the programme and its required courses, once; a full cohort turns people away', async () => {
+    const joined = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(ada), body: {} });
+    expect(joined.status).toBe(201);
+    const mine = joined.body as MyProgram;
+    expect(mine.cohort).toMatchObject({ id: cohort.id, learnerCount: 1 });
+    expect(mine.thisWeek).toMatchObject({ weekNo: 1 });
+    expect(mine.upcomingSessions.length).toBeGreaterThan(0);
+    expect(mine.courses.length).toBeGreaterThan(0);
+    expect(mine.courses.every((c) => c.required && c.enrollmentId)).toBe(true);
+    expect(mine.electives.length).toBeGreaterThan(0);
+
+    const again = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(ada), body: {} });
+    expect((again.body as MyProgram).enrollment.id).toBe(mine.enrollment.id);
+    expect(await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(tunde), body: {} })).toMatchObject({ status: 409, body: { code: 'cohort_full' } });
+    expect(await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { capacity: null } })).toMatchObject({ status: 200 });
+
+    const courses = (await request(learning, 'GET', '/v1/learning/enrollments', L(ada))).body as { items: { contextOrgId: string }[] };
+    expect(courses.items).toHaveLength(mine.courses.length);
+    expect(courses.items.every((e) => e.contextOrgId === hostOrgId)).toBe(true);
+  });
+
+  it('chooses electives: exactly as many as the phase asks, from one group', async () => {
+    const [mine] = ((await request(learning, 'GET', '/v1/learning/me/programs', L(ada))).body as { items: MyProgram[] }).items;
+    const group = mine!.electives[0]!;
+    expect(group).toMatchObject({ locked: false, chosen: [] });
+    const url = `/v1/learning/me/programs/${mine!.enrollment.id}/electives`;
+    const tooMany = group.options.slice(0, group.chooseN + 1).map((c) => c.slug);
+    if (tooMany.length > group.chooseN) {
+      expect(await request(learning, 'POST', url, { ...L(ada), body: { courseSlugs: tooMany } })).toMatchObject({ status: 400, body: { code: 'wrong_number_of_electives' } });
+    }
+    expect(await request(learning, 'POST', url, { ...L(ada), body: { courseSlugs: ['problem-solving'] } })).toMatchObject({ status: 400 });
+    const picks = group.options.slice(0, group.chooseN).map((c) => c.slug);
+    const chosen = await request(learning, 'POST', url, { ...L(ada), body: { courseSlugs: picks } });
+    expect(chosen.status).toBe(200);
+    const after = chosen.body as MyProgram;
+    expect(after.electives.find((e) => e.phase === group.phase)!.chosen).toEqual(picks);
+    expect(after.courses.filter((c) => !c.required).map((c) => c.course.slug)).toEqual(picks);
+    expect((await request(learning, 'POST', url, { ...L(tunde), body: { courseSlugs: picks } })).status).toBe(404);
+  });
+
+  it('takes attendance: managers mark, corrections replace, learners see their own count', async () => {
+    const session = cohort.sessions[0]!;
+    const url = `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}/attendance`;
+    expect((await request(learning, 'GET', url, L(ada))).status).toBe(404);
+    const sheet = await request(learning, 'GET', url, L(host));
+    expect(sheet.body).toMatchObject({ session: { id: session.id }, items: [{ name: 'Ada Obi', status: null }] });
+    const adaId = (sheet.body as { items: { userId: string }[] }).items[0]!.userId;
+
+    await request(learning, 'PUT', url, { ...L(host), body: { entries: [{ userId: adaId, status: 'absent' }] } });
+    const marked = await request(learning, 'PUT', url, { ...L(host), body: { entries: [{ userId: adaId, status: 'present', minutes: 90 }] } });
+    expect(marked.body).toMatchObject({ items: [{ userId: adaId, status: 'present', minutes: 90 }] });
+    const stranger = await request(learning, 'PUT', url, { ...L(host), body: { entries: [{ userId: hostOrgId, status: 'present' }] } });
+    expect(stranger).toMatchObject({ status: 404, body: { code: 'learner_not_in_cohort' } });
+
+    const moved = await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}`, { ...L(host), body: { location: 'https://meet.example/dreamlab' } });
+    expect(moved.body).toMatchObject({ id: session.id, location: 'https://meet.example/dreamlab' });
+
+    const roster = await request(learning, 'GET', `/v1/learning/cohorts/${cohort.id}/roster`, L(host));
+    expect(roster.body).toMatchObject({ items: [{ userId: adaId, name: 'Ada Obi', status: 'active', progressPct: 0 }] });
+    const [mine] = ((await request(learning, 'GET', '/v1/learning/me/programs', L(ada))).body as { items: MyProgram[] }).items;
+    expect(mine!.attendance.attended).toBe(1);
+  });
+
+  it('keeps a closed cohort closed', async () => {
+    expect((await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { status: 'closed' } })).body).toMatchObject({ status: 'closed' });
+    expect(await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { status: 'open' } })).toMatchObject({ status: 409, body: { code: 'cohort_closed' } });
+    expect(await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(tunde), body: {} })).toMatchObject({ status: 409, body: { code: 'cohort_not_open' } });
   });
 });
