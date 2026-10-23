@@ -252,6 +252,8 @@ export class SsoSignInService {
 
   /** Sign-on is also how people join: first sign-in makes them a member with the default role. */
   private async ensureMembership(tx: IamTx, userId: string, connection: ConnectionRow, meta: RequestMeta): Promise<void> {
+    // The user's lock first: a domain join or invitation for the same person waits, and we see its result.
+    await lockUserRow(tx, userId);
     const [existing] = await tx.select().from(memberships).where(and(eq(memberships.userId, userId), eq(memberships.orgId, connection.orgId)));
     if (existing?.status === 'active') return;
     if (existing?.status === 'suspended') throw forbidden('membership_suspended', 'Your access to this organisation is paused. Ask an admin.');
@@ -259,7 +261,6 @@ export class SsoSignInService {
     if (existing) {
       await tx.update(memberships).set({ status: 'active', joinedAt: new Date() }).where(eq(memberships.id, existing.id));
     } else {
-      await lockUserRow(tx, userId);
       await tx.insert(memberships).values({ id: membershipId, userId, orgId: connection.orgId, status: 'active', source: 'domain', joinedAt: new Date() });
     }
     const [anyRole] = await tx.select({ id: roleAssignments.id }).from(roleAssignments).where(eq(roleAssignments.membershipId, membershipId));
