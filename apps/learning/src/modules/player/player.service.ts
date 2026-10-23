@@ -15,7 +15,7 @@ import { badRequest, conflict, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
 import { CatalogClient, ContentItemRef, CourseContent, IamRpc, RpcClient, UserName } from '@lib/rpc';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, EnrollmentRow, flatItems, learnerCtx, toEnrollment } from '../enrollments/enrollments.service';
@@ -23,6 +23,9 @@ import { checkBlock, findBlock, gradeQuiz, interactiveBlocks, isSettled, wordCou
 import { courseFinalScore, itemScores, releasedGrades } from '../grading/course-score';
 
 export const IAM_NAMES = Symbol('IAM_NAMES');
+
+/** Newest discussion posts shown at once (each with its replies). */
+const DISCUSSION_POSTS = 100;
 
 const { courseEnrollments, itemProgress, submissions, grades } = schema;
 type ProgressRow = typeof itemProgress.$inferSelect;
@@ -149,6 +152,8 @@ export class PlayerService {
     if (item.authoring.type !== 'quiz') throw badRequest('not_a_quiz', 'This item is not a quiz.');
     const quiz = item.authoring;
     return this.db.tenant(learnerCtx(p), async (tx) => {
+      // Attempts are counted under a lock on the enrolment, so parallel submissions can't all be "the first".
+      await this.lockEnrollment(tx, enrollment.id);
       await this.ensureProgress(tx, p, enrollment, item);
       const [{ n } = { n: 0 }] = await tx
         .select({ n: sql<number>`count(*)::int` })
@@ -188,6 +193,7 @@ export class PlayerService {
     const criteria = new Set(item.authoring.payload.rubric.map((r) => r.id));
     const selfAssessment = Object.fromEntries(Object.entries(body.selfAssessment).filter(([k]) => criteria.has(k)));
     return this.db.tenant(learnerCtx(p), async (tx) => {
+      await this.lockEnrollment(tx, enrollment.id);
       await this.ensureProgress(tx, p, enrollment, item);
       const [{ n } = { n: 0 }] = await tx
         .select({ n: sql<number>`count(*)::int` })
@@ -230,7 +236,17 @@ export class PlayerService {
         const [parent] = await this.db.sys
           .select({ id: submissions.id })
           .from(submissions)
-          .where(and(eq(submissions.id, body.parentId), eq(submissions.courseId, enrollment.courseId), eq(submissions.itemKey, item.key), eq(submissions.kind, 'discussion'), isNull(submissions.parentId)));
+          .where(
+            and(
+              eq(submissions.id, body.parentId),
+              eq(submissions.courseId, enrollment.courseId),
+              eq(submissions.itemKey, item.key),
+              eq(submissions.kind, 'discussion'),
+              isNull(submissions.parentId),
+              // Replies stay within the learner's own context (organisation, or personal learning).
+              enrollment.contextOrgId ? eq(submissions.contextOrgId, enrollment.contextOrgId) : isNull(submissions.contextOrgId),
+            ),
+          );
         if (!parent) throw notFound('post_not_found', 'That post no longer exists.');
       } else if (wordCount(body.body) < minWords) {
         throw badRequest('post_too_short', `Write at least ${minWords} words so others have something to respond to.`);
@@ -256,25 +272,37 @@ export class PlayerService {
    * Posts from learners on the same course item in the same context (an organisation's learners
    * see each other; personal learners see other personal learners). Visible after posting.
    */
+  /**
+   * The discussion for this item among learners in the same context. Whether the learner has posted
+   * and how many posts there are come from their own queries, so a flood of replies can't hide
+   * either; the newest posts are shown, with replies for just those posts.
+   */
   private async discussion(p: Principal, enrollment: EnrollmentRow, item: ContentItemRef): Promise<Discussion> {
-    const rows = await this.db.sys
-      .select()
-      .from(submissions)
-      .where(
-        and(
-          eq(submissions.courseId, enrollment.courseId),
-          eq(submissions.itemKey, item.key),
-          eq(submissions.kind, 'discussion'),
-          enrollment.contextOrgId ? eq(submissions.contextOrgId, enrollment.contextOrgId) : isNull(submissions.contextOrgId),
-        ),
-      )
-      .orderBy(asc(submissions.submittedAt))
-      .limit(500);
-    const posts = rows.filter((r) => !r.parentId);
-    const hasPosted = posts.some((r) => r.userId === p.userId);
-    if (!hasPosted) return { hasPosted, postCount: posts.length, posts: [] };
+    const here = and(
+      eq(submissions.courseId, enrollment.courseId),
+      eq(submissions.itemKey, item.key),
+      eq(submissions.kind, 'discussion'),
+      enrollment.contextOrgId ? eq(submissions.contextOrgId, enrollment.contextOrgId) : isNull(submissions.contextOrgId),
+    );
+    const topLevel = and(here, isNull(submissions.parentId));
+    const [[mine], [total]] = await Promise.all([
+      this.db.sys.select({ id: submissions.id }).from(submissions).where(and(topLevel, eq(submissions.userId, p.userId))).limit(1),
+      this.db.sys.select({ n: sql<number>`count(*)::int` }).from(submissions).where(topLevel),
+    ]);
+    const hasPosted = !!mine;
+    const postCount = total?.n ?? 0;
+    if (!hasPosted) return { hasPosted, postCount, posts: [] };
+    const posts = await this.db.sys.select().from(submissions).where(topLevel).orderBy(desc(submissions.submittedAt)).limit(DISCUSSION_POSTS);
+    const replies = posts.length
+      ? await this.db.sys
+          .select()
+          .from(submissions)
+          .where(and(here, inArray(submissions.parentId, posts.map((r) => r.id))))
+          .orderBy(asc(submissions.submittedAt))
+          .limit(DISCUSSION_POSTS * 20)
+      : [];
     const names = new Map(
-      (await this.iam.send<UserName[]>(IamRpc.UserNames, { userIds: [...new Set(rows.map((r) => r.userId))] }).catch(() => [] as UserName[])).map((u) => [u.id, u.name]),
+      (await this.iam.send<UserName[]>(IamRpc.UserNames, { userIds: [...new Set([...posts, ...replies].map((r) => r.userId))] }).catch(() => [] as UserName[])).map((u) => [u.id, u.name]),
     );
     const author = (userId: string) => {
       const name = userId === p.userId ? 'You' : (names.get(userId) ?? 'A learner');
@@ -282,20 +310,19 @@ export class PlayerService {
     };
     return {
       hasPosted,
-      postCount: posts.length,
-      posts: posts
-        .reverse()
-        .map((r) => ({
-          id: r.id,
-          author: author(r.userId),
-          body: r.body ?? '',
-          createdAt: r.submittedAt.toISOString(),
-          replies: rows
-            .filter((x) => x.parentId === r.id)
-            .map((x) => ({ id: x.id, author: author(x.userId), body: x.body ?? '', createdAt: x.submittedAt.toISOString() })),
-        })),
+      postCount,
+      posts: posts.map((r) => ({
+        id: r.id,
+        author: author(r.userId),
+        body: r.body ?? '',
+        createdAt: r.submittedAt.toISOString(),
+        replies: replies
+          .filter((x) => x.parentId === r.id)
+          .map((x) => ({ id: x.id, author: author(x.userId), body: x.body ?? '', createdAt: x.submittedAt.toISOString() })),
+      })),
     };
   }
+
 
   /**
    * How every learner answered a poll or scale: each learner's latest answer counts once. Read on
@@ -323,7 +350,9 @@ export class PlayerService {
   }
 
   /** Mark an item done and roll the enrolment forward; finishing every required item completes the course. */
-  private async complete(tx: LearningTx, p: Principal, enrollment: EnrollmentRow, content: CourseContent, item: ContentItemRef) {
+  private async complete(tx: LearningTx, p: Principal, stale: EnrollmentRow, content: CourseContent, item: ContentItemRef) {
+    // Re-read under a lock: two items finishing at once must not both complete the course.
+    const enrollment = (await this.lockEnrollment(tx, stale.id)) ?? stale;
     const updated = await tx
       .update(itemProgress)
       .set({ status: 'completed', progressPct: 100, completedAt: new Date(), rowVersion: sql`${itemProgress.rowVersion} + 1` })
@@ -366,6 +395,11 @@ export class PlayerService {
       });
     }
     return { status: 'completed' as const, enrollment: toEnrollment(fresh!), courseCompleted: finished };
+  }
+
+  private async lockEnrollment(tx: LearningTx, enrollmentId: string): Promise<EnrollmentRow | undefined> {
+    const [row] = await tx.select().from(courseEnrollments).where(eq(courseEnrollments.id, enrollmentId)).for('update');
+    return row;
   }
 
   private async locate(p: Principal, enrollmentId: string, itemId: string): Promise<Located> {

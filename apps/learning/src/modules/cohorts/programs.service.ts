@@ -5,7 +5,7 @@ import { badRequest, conflict, forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
 import { CatalogClient } from '@lib/rpc';
-import { and, asc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, flatItems } from '../enrollments/enrollments.service';
@@ -13,7 +13,7 @@ import { programmeScore } from '../grading/course-score';
 import { addDays, todayIn, weekOf } from './calendar-time';
 import { CohortRow, learnerCounts, toCalendarWeek, toCohort, toSession } from './cohorts.service';
 
-const { cohorts, calendarWeeks, courseRuns, classSessions, programEnrollments, electiveSelections, attendance, courseEnrollments } = schema;
+const { cohorts, calendarWeeks, courseRuns, classSessions, programEnrollments, electiveSelections, attendance, courseEnrollments, itemProgress, submissions } = schema;
 type ProgramEnrollmentRow = typeof programEnrollments.$inferSelect;
 type RunRow = typeof courseRuns.$inferSelect;
 
@@ -108,6 +108,8 @@ export class ProgramsService {
     const [cohort] = await this.db.sys.select().from(cohorts).where(eq(cohorts.id, enrollment.cohortId));
     const program = await this.catalog.program(enrollment.programSlug);
     if (!cohort || !program) throw notFound('program_not_found', 'Programme not found');
+    if (enrollment.status !== 'active') throw conflict('program_enrollment_inactive', 'Your place in this programme is not active.');
+    if (!(JOINABLE as readonly string[]).includes(cohort.status) && cohort.status !== 'closed') throw conflict('cohort_not_open', 'This cohort isn’t running yet.');
 
     const slugs = [...new Set(courseSlugs)];
     const runs = await this.db.sys
@@ -132,7 +134,35 @@ export class ProgramsService {
       );
       for (const run of runs) await this.enrolInRun(tx, p, cohort, enrollment.id, run, requestId);
     });
+    await this.dropUnopenedElectives(p, enrollment.id, cohort.id, group, runs.map((r) => r.id));
     return this.myProgram(p, enrollment.id);
+  }
+
+  /**
+   * After a new choice, enrolments in the group's other courses go if the learner never opened them,
+   * so switching back and forth can't collect every elective. Opened ones stay, with their progress.
+   */
+  private async dropUnopenedElectives(p: Principal, programEnrollmentId: string, cohortId: string, group: string, keepRunIds: string[]) {
+    await this.db.system(async (tx) => {
+      const others = await tx
+        .select({ id: courseRuns.id })
+        .from(courseRuns)
+        .where(and(eq(courseRuns.cohortId, cohortId), eq(courseRuns.electiveGroupKey, group), notInArray(courseRuns.id, keepRunIds)));
+      if (others.length === 0) return;
+      const candidates = await tx
+        .select({ id: courseEnrollments.id })
+        .from(courseEnrollments)
+        .where(
+          and(
+            eq(courseEnrollments.userId, p.userId),
+            eq(courseEnrollments.programEnrollmentId, programEnrollmentId),
+            inArray(courseEnrollments.courseRunId, others.map((o) => o.id)),
+            sql`not exists (select 1 from ${itemProgress} where ${itemProgress.courseEnrollmentId} = ${courseEnrollments.id})`,
+            sql`not exists (select 1 from ${submissions} where ${submissions.courseEnrollmentId} = ${courseEnrollments.id})`,
+          ),
+        );
+      if (candidates.length > 0) await tx.delete(courseEnrollments).where(inArray(courseEnrollments.id, candidates.map((c) => c.id)));
+    });
   }
 
   async myProgram(p: Principal, enrollmentId: string): Promise<MyProgram> {

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CourseAuthoring, CourseAuthoringSchema, ProgramAuthoring, ProgramAuthoringSchema } from '@dreamlab/contracts';
-import { newId, sha256 } from '@lib/common';
+import { conflict, newId, sha256 } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, SYSTEM_ACTOR } from '@lib/messaging';
 import { IamRpc, RpcClient } from '@lib/rpc';
@@ -99,6 +99,8 @@ export class CatalogSeedService {
           await tx.insert(catalogListings).values({ id: newId(), ownerOrgId, itemType: 'course', itemId: row!.id, channel: 'public', featured }).onConflictDoNothing();
         }
       } else {
+        // A slug names one organisation's course: an import never takes over another's.
+        if (row.ownerOrgId !== ownerOrgId) throw conflict('slug_owned_elsewhere', `Another organisation already has a course at "${c.slug}". Choose another slug.`);
         await tx.update(courses).set(details).where(eq(courses.id, row.id));
       }
       const [current] = row!.currentVersionId ? await tx.select().from(courseVersions).where(eq(courseVersions.id, row!.currentVersionId)) : [];
@@ -205,6 +207,7 @@ export class CatalogSeedService {
       };
       let [row] = await tx.select().from(programs).where(eq(programs.slug, p.slug));
       if (!row) [row] = await tx.insert(programs).values({ id: newId(), ownerOrgId, slug: p.slug, ...details }).returning();
+      else if (row.ownerOrgId !== ownerOrgId) throw conflict('slug_owned_elsewhere', `Another organisation already has a programme at "${p.slug}". Choose another slug.`);
       else await tx.update(programs).set(details).where(eq(programs.id, row.id));
       const programId = row!.id;
 

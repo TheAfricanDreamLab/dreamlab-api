@@ -4,7 +4,7 @@ import type { Principal } from '@lib/auth';
 import { notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import type { ContentItemRef, CourseContent } from '@lib/rpc';
-import { and, asc, eq, ilike, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
 import { CatalogDatabase, schema } from '../../database';
 
 const { courses, courseVersions, courseModules, contentItems, assessments, questions, assignmentSpecs, rubricCriteria, catalogListings, programs, programCourses } =
@@ -215,7 +215,8 @@ export class CatalogReadService {
         .select({ courseId: programCourses.courseId, slug: programs.slug, title: programs.title })
         .from(programCourses)
         .innerJoin(programs, eq(programs.id, programCourses.programId))
-        .where(inArray(programCourses.courseId, ids)),
+        // Summaries go to anyone, so only programmes anyone may see are named.
+        .where(and(inArray(programCourses.courseId, ids), ne(programs.visibility, 'org_private'))),
     ]);
     return rows.map((r) => {
       const v = versions.find((x) => x.id === r.currentVersionId);

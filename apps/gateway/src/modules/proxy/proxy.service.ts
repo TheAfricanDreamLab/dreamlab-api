@@ -26,6 +26,13 @@ const CONTEXT_NEUTRAL = [
   /^\/v1\/learning\//,
 ];
 
+/**
+ * Dot segments (plain or percent-encoded), encoded slashes or backslashes, and empty segments. The
+ * upstream URL resolves them, so the path checked here would not be the path served: refuse them.
+ */
+const AMBIGUOUS_PATH = /(^|\/)(\.|%2e){1,2}(\/|$)|%2f|%5c|\\|\/\//i;
+export const isAmbiguousPath = (path: string): boolean => AMBIGUOUS_PATH.test(path);
+
 /** Paths a signed-in user may call on any organisation's site, whatever their active organisation. */
 export const isContextNeutral = (path: string): boolean => CONTEXT_NEUTRAL.some((re) => re.test(path));
 
@@ -42,6 +49,7 @@ export class ProxyService {
 
   async forward(req: FastifyRequest, reply: FastifyReply, upstreamBase: string): Promise<void> {
     const path = req.url.split('?')[0]!;
+    if (isAmbiguousPath(path)) throw new AppException(HttpStatus.BAD_REQUEST, 'bad_path', 'This address is not valid');
     const header = (name: string) => {
       const v = req.headers[name];
       return Array.isArray(v) ? v[0] : v;

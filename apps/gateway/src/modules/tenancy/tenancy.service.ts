@@ -11,6 +11,8 @@ import type { GatewayConfig } from '../../config';
 import type { Tenant } from './interfaces/tenant.interface';
 
 const ORG_RESOLVE_PATTERN = 'iam.orgs.resolve';
+/** Unknown slugs are cheap to send (any subdomain label), so the cache keeps at most this many, oldest out first. */
+const MAX_CACHED = 5000;
 const POSITIVE_TTL_MS = 5 * 60_000;
 const NEGATIVE_TTL_MS = 30_000;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -96,7 +98,9 @@ export class TenantService implements OnApplicationBootstrap, OnModuleDestroy {
       this.logger.error(`Tenant lookup failed: ${err instanceof Error ? err.message : String(err)}`);
       throw new AppException(HttpStatus.SERVICE_UNAVAILABLE, 'upstream_unavailable', 'Service temporarily unavailable');
     }
+    this.cache.delete(slug);
     this.cache.set(slug, { tenant, expires: Date.now() + (tenant ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS) });
+    while (this.cache.size > MAX_CACHED) this.cache.delete(this.cache.keys().next().value!);
     if (!tenant) throw notFound('tenant_not_found', 'Unknown organisation');
     return tenant;
   }
