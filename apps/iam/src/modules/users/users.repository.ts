@@ -84,3 +84,12 @@ export class UsersRepository {
     return user.emailVerifiedAt !== null || user.phoneVerifiedAt !== null;
   }
 }
+
+/**
+ * Lock a user's row for the rest of the transaction. Taken by everything that adds someone to an
+ * organisation and by SCIM before it changes an account, so "does this person belong elsewhere?"
+ * can't change between SCIM's check and its update.
+ */
+export async function lockUserRow(tx: IamTx, userId: string): Promise<void> {
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for('update');
+}

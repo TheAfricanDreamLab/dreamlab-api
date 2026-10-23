@@ -47,7 +47,7 @@ export class CatalogReadService {
       );
     }
     const rows = await this.db.sys.select().from(courses).where(and(...conditions));
-    const summaries = await this.summarize(rows);
+    const summaries = await this.summarize(rows, principal);
     return summaries.sort((a, b) => Number(b.featured) - Number(a.featured) || Number(a.availability === 'coming_soon') - Number(b.availability === 'coming_soon') || a.title.localeCompare(b.title));
   }
 
@@ -60,7 +60,7 @@ export class CatalogReadService {
   async getCourse(slug: string, principal: Principal | null): Promise<CourseDetail> {
     const [row] = await this.db.sys.select().from(courses).where(eq(courses.slug, slug));
     if (!row || !this.canSee(row, principal)) throw notFound('course_not_found', 'Course not found');
-    const [summary] = await this.summarize([row]);
+    const [summary] = await this.summarize([row], principal);
     const version = row.currentVersionId ? await this.version(row.currentVersionId) : null;
     const modules = version ? await this.outline(version.id) : [];
     return {
@@ -193,8 +193,12 @@ export class CatalogReadService {
     }));
   }
 
-  /** Course rows → summaries, with version figures, listing flags and programme membership. */
-  async summarize(rows: CourseRow[]): Promise<CourseSummary[]> {
+  /**
+   * Course rows → summaries, with version figures, listing flags and programme membership. Private
+   * programmes are named only to the viewer who may see them (their organisation, platform admins);
+   * with no viewer (service calls), only public programmes are named.
+   */
+  async summarize(rows: CourseRow[], viewer: Principal | null = null): Promise<CourseSummary[]> {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
     const versionIds = rows.map((r) => r.currentVersionId).filter((v): v is string => !!v);
@@ -215,8 +219,16 @@ export class CatalogReadService {
         .select({ courseId: programCourses.courseId, slug: programs.slug, title: programs.title })
         .from(programCourses)
         .innerJoin(programs, eq(programs.id, programCourses.programId))
-        // Summaries go to anyone, so only programmes anyone may see are named.
-        .where(and(inArray(programCourses.courseId, ids), ne(programs.visibility, 'org_private'))),
+        .where(
+          and(
+            inArray(programCourses.courseId, ids),
+            viewer?.platformAdmin
+              ? undefined
+              : viewer?.orgId
+                ? or(ne(programs.visibility, 'org_private'), eq(programs.ownerOrgId, viewer.orgId))
+                : ne(programs.visibility, 'org_private'),
+          ),
+        ),
     ]);
     return rows.map((r) => {
       const v = versions.find((x) => x.id === r.currentVersionId);

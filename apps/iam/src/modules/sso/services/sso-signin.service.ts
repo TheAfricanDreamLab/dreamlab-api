@@ -20,7 +20,7 @@ import { emailDomain } from '../../auth/utils/email-domain';
 import { AuthzService } from '../../authz/authz.service';
 import { SecretBox } from '../../keys/secret-box.service';
 import type { OidcConfig, SamlConfig } from '../../organizations/entities/sso-connection.entity';
-import { UsersRepository } from '../../users/users.repository';
+import { lockUserRow, UsersRepository } from '../../users/users.repository';
 import { OidcClient, OidcError } from '../providers/oidc.client';
 import { SamlClient } from '../providers/saml.client';
 import { OIDC_CLIENT, samlEntityId, serviceProvider } from './sso-connections.service';
@@ -259,6 +259,7 @@ export class SsoSignInService {
     if (existing) {
       await tx.update(memberships).set({ status: 'active', joinedAt: new Date() }).where(eq(memberships.id, existing.id));
     } else {
+      await lockUserRow(tx, userId);
       await tx.insert(memberships).values({ id: membershipId, userId, orgId: connection.orgId, status: 'active', source: 'domain', joinedAt: new Date() });
     }
     const [anyRole] = await tx.select({ id: roleAssignments.id }).from(roleAssignments).where(eq(roleAssignments.membershipId, membershipId));

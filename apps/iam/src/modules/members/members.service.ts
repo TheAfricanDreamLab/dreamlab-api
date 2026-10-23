@@ -14,7 +14,7 @@ import { pageResult } from '../../common/mappers/pagination';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
 import { IamEvents } from '../../events';
-import { AuthzService } from '../authz/authz.service';
+import { activeAssignment, AuthzService } from '../authz/authz.service';
 import { MembershipLoader } from './services/membership-loader.service';
 
 const { memberships, users, roleAssignments, roles, orgUnits, groups, organizations } = schema;
@@ -122,7 +122,7 @@ export class MembersService {
       .select({ permissions: roles.permissions })
       .from(roleAssignments)
       .innerJoin(roles, eq(roles.id, roleAssignments.roleId))
-      .where(eq(roleAssignments.membershipId, membershipId));
+      .where(and(eq(roleAssignments.membershipId, membershipId), activeAssignment()));
     await this.authz.assertMayGrant(principal.userId, orgId, held.flatMap((h) => h.permissions));
   }
 

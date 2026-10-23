@@ -126,15 +126,18 @@ export class ProgramsService {
     if (slugs.length !== phase.chooseN) throw badRequest('wrong_number_of_electives', `Choose exactly ${phase.chooseN} of the ${group} courses.`);
     if (this.electiveLocked(cohort, phase.weekFrom)) throw conflict('electives_locked', `The deadline to choose ${group} courses has passed.`);
 
-    await this.db.tenant(hostCtx(p, cohort), async (tx) => {
+    // One transaction, serialized per programme enrolment, so two choices made at once can't each
+    // remove the other's new enrolment. The learner's ownership was checked above (ownEnrollment).
+    await this.db.system(async (tx) => {
+      await tx.select({ id: programEnrollments.id }).from(programEnrollments).where(eq(programEnrollments.id, enrollment.id)).for('update');
       // A new choice replaces the earlier one; courses already started stay enrolled, with their progress.
       await tx.delete(electiveSelections).where(and(eq(electiveSelections.programEnrollmentId, enrollment.id), eq(electiveSelections.groupKey, group)));
       await tx.insert(electiveSelections).values(
         runs.map((r) => ({ id: newId(), programEnrollmentId: enrollment.id, userId: p.userId, groupKey: group, courseId: r.courseId, courseSlug: r.courseSlug })),
       );
       for (const run of runs) await this.enrolInRun(tx, p, cohort, enrollment.id, run, requestId);
+      await this.dropUnopenedElectives(tx, p, enrollment.id, cohort.id, group, runs.map((r) => r.id));
     });
-    await this.dropUnopenedElectives(p, enrollment.id, cohort.id, group, runs.map((r) => r.id));
     return this.myProgram(p, enrollment.id);
   }
 
@@ -142,27 +145,25 @@ export class ProgramsService {
    * After a new choice, enrolments in the group's other courses go if the learner never opened them,
    * so switching back and forth can't collect every elective. Opened ones stay, with their progress.
    */
-  private async dropUnopenedElectives(p: Principal, programEnrollmentId: string, cohortId: string, group: string, keepRunIds: string[]) {
-    await this.db.system(async (tx) => {
-      const others = await tx
-        .select({ id: courseRuns.id })
-        .from(courseRuns)
-        .where(and(eq(courseRuns.cohortId, cohortId), eq(courseRuns.electiveGroupKey, group), notInArray(courseRuns.id, keepRunIds)));
-      if (others.length === 0) return;
-      const candidates = await tx
-        .select({ id: courseEnrollments.id })
-        .from(courseEnrollments)
-        .where(
-          and(
-            eq(courseEnrollments.userId, p.userId),
-            eq(courseEnrollments.programEnrollmentId, programEnrollmentId),
-            inArray(courseEnrollments.courseRunId, others.map((o) => o.id)),
-            sql`not exists (select 1 from ${itemProgress} where ${itemProgress.courseEnrollmentId} = ${courseEnrollments.id})`,
-            sql`not exists (select 1 from ${submissions} where ${submissions.courseEnrollmentId} = ${courseEnrollments.id})`,
-          ),
-        );
-      if (candidates.length > 0) await tx.delete(courseEnrollments).where(inArray(courseEnrollments.id, candidates.map((c) => c.id)));
-    });
+  private async dropUnopenedElectives(tx: LearningTx, p: Principal, programEnrollmentId: string, cohortId: string, group: string, keepRunIds: string[]) {
+    const others = await tx
+      .select({ id: courseRuns.id })
+      .from(courseRuns)
+      .where(and(eq(courseRuns.cohortId, cohortId), eq(courseRuns.electiveGroupKey, group), notInArray(courseRuns.id, keepRunIds)));
+    if (others.length === 0) return;
+    const candidates = await tx
+      .select({ id: courseEnrollments.id })
+      .from(courseEnrollments)
+      .where(
+        and(
+          eq(courseEnrollments.userId, p.userId),
+          eq(courseEnrollments.programEnrollmentId, programEnrollmentId),
+          inArray(courseEnrollments.courseRunId, others.map((o) => o.id)),
+          sql`not exists (select 1 from ${itemProgress} where ${itemProgress.courseEnrollmentId} = ${courseEnrollments.id})`,
+          sql`not exists (select 1 from ${submissions} where ${submissions.courseEnrollmentId} = ${courseEnrollments.id})`,
+        ),
+      );
+    if (candidates.length > 0) await tx.delete(courseEnrollments).where(inArray(courseEnrollments.id, candidates.map((c) => c.id)));
   }
 
   async myProgram(p: Principal, enrollmentId: string): Promise<MyProgram> {

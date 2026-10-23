@@ -12,7 +12,7 @@ import { IamEvents } from '../../../events';
 import { pendingPasswordKey } from '../../auth/auth.service';
 import { emailDomain } from '../../auth/utils/email-domain';
 import { AuthzService } from '../../authz/authz.service';
-import { UsersRepository } from '../../users/users.repository';
+import { lockUserRow, UsersRepository } from '../../users/users.repository';
 import { listResponse, paging, parseEqFilter, patchOperations, SCIM, scimBadRequest, scimBoolean, scimConflict, scimNotFound } from '../utils/scim';
 
 const { memberships, users, orgDomains, roleAssignments, roles, groupMembers, ssoConnections, sessions, scimDirectories } = schema;
@@ -195,13 +195,17 @@ export class ScimUsersService {
       await this.assertDomain(orgId, input.email);
     }
     return this.db.system(async (tx) => {
+      // Decided again under the user's lock: a membership elsewhere may have been added since the check above.
+      await lockUserRow(tx, row.u.id);
+      const ownedNow = owned && (await this.ownsAccount(orgId, row.u, tx));
+      if (input.email !== row.u.email && !ownedNow) throw scimBadRequest('This person also uses their account outside the organisation, so its email address cannot be changed through SCIM');
       if (input.externalId) await this.assertExternalIdFree(tx, orgId, input.externalId, row.m.id);
       if (input.email !== row.u.email) {
         const taken = await this.users.findByIdentifier(input.email, tx);
         if (taken && taken.id !== row.u.id) throw scimConflict('Another account already uses that email address');
         await tx.update(users).set({ email: input.email, emailVerifiedAt: new Date() }).where(eq(users.id, row.u.id));
       }
-      if (owned && input.fullName !== row.u.fullName) await tx.update(users).set({ fullName: input.fullName.slice(0, 120) }).where(eq(users.id, row.u.id));
+      if (ownedNow && input.fullName !== row.u.fullName) await tx.update(users).set({ fullName: input.fullName.slice(0, 120) }).where(eq(users.id, row.u.id));
       const status = input.active ? ('active' as const) : ('suspended' as const);
       const [m] = await tx
         .update(memberships)
@@ -268,15 +272,15 @@ export class ScimUsersService {
    * domains, belongs to no other organisation and is not a platform admin. Only then may SCIM change
    * the account itself (email, name); otherwise it manages just the membership.
    */
-  private async ownsAccount(orgId: string, user: typeof users.$inferSelect): Promise<boolean> {
+  private async ownsAccount(orgId: string, user: typeof users.$inferSelect, db: IamDatabase['sys'] | IamTx = this.db.sys): Promise<boolean> {
     if (!user.email) return false;
     const domain = emailDomain(user.email);
-    const [verified] = await this.db.sys
+    const [verified] = await db
       .select({ id: orgDomains.id })
       .from(orgDomains)
       .where(and(eq(orgDomains.orgId, orgId), eq(orgDomains.domain, domain ?? ''), isNotNull(orgDomains.verifiedAt)));
     if (!verified) return false;
-    const [elsewhere] = await this.db.sys
+    const [elsewhere] = await db
       .select({ id: memberships.id })
       .from(memberships)
       .where(and(eq(memberships.userId, user.id), ne(memberships.orgId, orgId), inArray(memberships.status, ['active', 'suspended', 'invited', 'requested'])));

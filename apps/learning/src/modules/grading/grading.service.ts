@@ -17,8 +17,8 @@ type SubmissionRow = typeof submissions.$inferSelect;
 type EnrollmentRow = typeof courseEnrollments.$inferSelect;
 type GradeRow = typeof grades.$inferSelect;
 
-/** The most submissions the queue looks through (newest first). */
-const QUEUE_SCAN = 2000;
+/** The most assignments (newest version each) the queue looks through. */
+const QUEUE_SCAN = 5000;
 
 export interface GradeInput {
   rubricScores: Record<string, number>;
@@ -27,7 +27,6 @@ export interface GradeInput {
 }
 
 const statusOf = (latest: GradeRow | undefined): GradingStatus => (!latest ? 'awaiting' : latest.releasedAt ? 'released' : 'draft');
-const key = (s: SubmissionRow) => `${s.courseEnrollmentId}:${s.contentItemId}`;
 
 /**
  * Faculty grading (LRN-3). Assignment submissions are graded by people with submission.grade where
@@ -50,15 +49,15 @@ export class GradingService {
   async queue(p: Principal, status: GradingStatus | 'all'): Promise<{ items: GradingQueueItem[] }> {
     const scope: SQL | undefined = p.orgId ? eq(submissions.contextOrgId, p.orgId) : p.platformAdmin ? isNull(submissions.contextOrgId) : undefined;
     if (!scope) throw forbidden('org_context_required', 'Switch to the organisation whose work you grade.');
+    // The newest version of each learner's assignment first, then the limit, so graded work can't
+    // crowd waiting work out of the scan.
     const rows = await this.db.sys
-      .select()
+      .selectDistinctOn([submissions.courseEnrollmentId, submissions.contentItemId])
       .from(submissions)
       .where(and(eq(submissions.kind, 'assignment'), scope))
-      .orderBy(desc(submissions.submittedAt))
+      .orderBy(submissions.courseEnrollmentId, submissions.contentItemId, desc(submissions.attemptNo))
       .limit(QUEUE_SCAN);
-    const latest = new Map<string, SubmissionRow>();
-    for (const s of rows) if (!latest.has(key(s))) latest.set(key(s), s);
-    const candidates = [...latest.values()].filter((s) => s.userId !== p.userId);
+    const candidates = rows.filter((s) => s.userId !== p.userId);
     if (candidates.length === 0) return { items: [] };
 
     const enrollments = await this.enrollments(candidates.map((s) => s.courseEnrollmentId));
@@ -111,19 +110,19 @@ export class GradingService {
     if (given.length !== criteria.length || criteria.some((c) => !(c in input.rubricScores))) {
       throw badRequest('rubric_incomplete', 'Score every rubric criterion, and only those.');
     }
-    const [newer] = await this.db.sys
-      .select({ id: submissions.id })
-      .from(submissions)
-      .where(and(eq(submissions.courseEnrollmentId, enrollment.id), eq(submissions.contentItemId, submission.contentItemId), eq(submissions.kind, 'assignment')))
-      .orderBy(desc(submissions.attemptNo))
-      .limit(1);
-    if (newer && newer.id !== submission.id) throw conflict('not_latest_version', 'The learner has submitted a newer version. Grade that one.');
-
     const rubricScores = Object.fromEntries(criteria.map((c) => [c, input.rubricScores[c]!]));
     const scorePct = rubricScorePct(criteria.map((c) => rubricScores[c]!));
     await this.db.system(async (tx) => {
       // One grader at a time per submission, so each regrade supersedes the one before it.
       await tx.select({ id: courseEnrollments.id }).from(courseEnrollments).where(eq(courseEnrollments.id, enrollment.id)).for('update');
+      // Checked under the lock submitAssignment also takes, so a newer version can't land in between.
+      const [newer] = await tx
+        .select({ id: submissions.id })
+        .from(submissions)
+        .where(and(eq(submissions.courseEnrollmentId, enrollment.id), eq(submissions.contentItemId, submission.contentItemId), eq(submissions.kind, 'assignment')))
+        .orderBy(desc(submissions.attemptNo))
+        .limit(1);
+      if (newer && newer.id !== submission.id) throw conflict('not_latest_version', 'The learner has submitted a newer version. Grade that one.');
       const [previous] = await tx.select().from(grades).where(eq(grades.submissionId, submission.id)).orderBy(desc(grades.createdAt)).limit(1);
       const gradeId = newId();
       await tx.insert(grades).values({

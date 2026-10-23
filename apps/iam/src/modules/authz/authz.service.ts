@@ -15,7 +15,7 @@ const GRANTS_TTL_SECONDS = 60;
 const { memberships, roleAssignments, roles, users, organizations, orgUnits } = schema;
 
 /** Is this assignment in force right now? */
-const activeAssignment = () =>
+export const activeAssignment = () =>
   and(
     or(isNull(roleAssignments.startsAt), lte(roleAssignments.startsAt, sql`now()`)),
     or(isNull(roleAssignments.endsAt), gt(roleAssignments.endsAt, sql`now()`)),

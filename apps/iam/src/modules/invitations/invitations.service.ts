@@ -19,7 +19,7 @@ import type { Notifier } from '../notifications/interfaces/notifier.interface';
 import { NOTIFIER } from '../notifications/notifier.service';
 import { channelFor } from '../notifications/utils/channel-for';
 import { maskDestination } from '../notifications/utils/mask-destination';
-import { UsersRepository } from '../users/users.repository';
+import { lockUserRow, UsersRepository } from '../users/users.repository';
 
 type CreateInvitation = z.infer<typeof CreateInvitationSchema>;
 const { invitations, memberships, roles, roleAssignments, orgUnits, organizations, users } = schema;
@@ -231,7 +231,10 @@ export class InvitationsService {
       const membershipId = existing?.id ?? newId();
       const values = { status: 'active' as const, source: 'invite' as const, orgUnitId: inv.orgUnitId, jobTitle: inv.jobTitle, joinedAt: new Date() };
       if (existing) await tx.update(memberships).set(values).where(eq(memberships.id, membershipId));
-      else await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId: inv.orgId, ...values });
+      else {
+        await lockUserRow(tx, user.id);
+        await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId: inv.orgId, ...values });
+      }
 
       const roleRows = await tx
         .select({ id: roles.id, key: roles.key })

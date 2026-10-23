@@ -181,6 +181,11 @@ export class PlayerService {
       // Graded automatically, so released at once. Assignments wait for a human.
       await tx.insert(grades).values({ id: newId(), submissionId, userId: p.userId, score: graded.scorePct, releasedAt: new Date() });
       if (graded.passed) await this.complete(tx, p, enrollment, content, item);
+      // Any new score can complete or change the final score, even after the course was completed.
+      await tx
+        .update(courseEnrollments)
+        .set({ finalScore: courseFinalScore(content, await itemScores(tx, enrollment.id)) })
+        .where(eq(courseEnrollments.id, enrollment.id));
       return this.toAttempt(row!);
     });
   }
