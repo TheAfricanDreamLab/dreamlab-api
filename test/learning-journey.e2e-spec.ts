@@ -88,8 +88,9 @@ async function boot(module: unknown, rpcQueue: string | null, rabbitUrl: string)
 let iamModule: unknown;
 
 async function signUp(email: string, fullName: string) {
-  await request(iam, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName, consent } });
-  const res = await request(iam, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.lastCode(email) } });
+  const reg = await request(iam, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName, consent } });
+  const registrationToken = (reg.body as { registrationToken: string }).registrationToken;
+  const res = await request(iam, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.lastCode(email), registrationToken } });
   expect(res.status).toBe(200);
   return (res.body as { accessToken: string }).accessToken;
 }
