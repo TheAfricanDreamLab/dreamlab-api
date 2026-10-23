@@ -19,6 +19,7 @@ import {
   ItemView,
   isInteractiveBlock,
   MyProgram,
+  SubmissionForGrading,
 } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE } from '@lib/auth';
 import { buildOpenApiDocument, installGatewayTrust, REDIS } from '@lib/common';
@@ -49,7 +50,14 @@ class CapturingNotifier implements Notifier {
   async sendOtp(m: OtpMessage) {
     this.otps.push(m);
   }
-  async sendInvitation() {}
+  invitations: { destination: string; acceptUrl: string }[] = [];
+  async sendInvitation(m: { destination: string; acceptUrl: string }) {
+    this.invitations.push(m);
+  }
+  lastInviteToken(destination: string) {
+    const url = [...this.invitations].reverse().find((i) => i.destination === destination)?.acceptUrl;
+    return url ? new URL(url).searchParams.get('token')! : undefined;
+  }
   lastCode(destination: string) {
     return [...this.otps].reverse().find((o) => o.destination === destination)?.code;
   }
@@ -80,8 +88,9 @@ async function boot(module: unknown, rpcQueue: string | null, rabbitUrl: string)
 let iamModule: unknown;
 
 async function signUp(email: string, fullName: string) {
-  await request(iam, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName, consent } });
-  const res = await request(iam, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.lastCode(email) } });
+  const reg = await request(iam, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName, consent } });
+  const registrationToken = (reg.body as { registrationToken: string }).registrationToken;
+  const res = await request(iam, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.lastCode(email), registrationToken } });
   expect(res.status).toBe(200);
   return (res.body as { accessToken: string }).accessToken;
 }
@@ -157,6 +166,7 @@ describe('contract parity', () => {
     ['catalog', () => catalog, apiV1Contract.catalog],
     ['learning', () => learning, apiV1Contract.learning],
     ['learning (cohorts)', () => learning, apiV1Contract.cohorts],
+    ['learning (grading)', () => learning, apiV1Contract.grading],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -507,5 +517,103 @@ describe('cohorts (LRN-2)', () => {
     expect((await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { status: 'closed' } })).body).toMatchObject({ status: 'closed' });
     expect(await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(host), body: { status: 'open' } })).toMatchObject({ status: 409, body: { code: 'cohort_closed' } });
     expect(await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(tunde), body: {} })).toMatchObject({ status: 409, body: { code: 'cohort_not_open' } });
+  });
+});
+
+describe('faculty grading (LRN-3)', () => {
+  let owner: string;
+  let teacher: string;
+  let student: string;
+  let orgId: string;
+  let enrollmentId: string;
+  let itemId: string;
+  let submissionId: string;
+  const canvas = Array.from({ length: 300 }, (_, i) => `idea${i}`).join(' ');
+
+  const tokenFor = async (email: string, name: string) => {
+    const personal = await signUp(email, name);
+    const accepted = await request(iam, 'POST', '/v1/invitations/accept', { token: personal, body: { token: notifier.lastInviteToken(email) } });
+    expect(accepted.status).toBe(200);
+    return ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+  };
+
+  beforeAll(async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const personal = await signUp('owner@kano-studio.test', 'Kemi Owner');
+    const org = await request(iam, 'POST', '/v1/orgs', { token: admin, body: { slug: 'kano-studio', name: 'Kano Studio', kinds: ['enterprise'], firstAdmin: { email: 'owner@kano-studio.test' } } });
+    orgId = (org.body as { id: string }).id;
+    owner = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    for (const [email, role] of [
+      ['teacher@kano-studio.test', 'instructor'],
+      ['student@kano-studio.test', 'learner'],
+    ] as const) {
+      expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email, roleKeys: [role] } })).status).toBe(201);
+    }
+    teacher = await tokenFor('teacher@kano-studio.test', 'Tayo Teacher');
+    student = await tokenFor('student@kano-studio.test', 'Sade Student');
+
+    const enrolled = await request(learning, 'POST', '/v1/learning/enrollments', { ...L(student), body: { courseSlug: 'problem-solving' } });
+    enrollmentId = (enrolled.body as Enrollment).id;
+    expect(enrolled.body).toMatchObject({ contextOrgId: orgId, finalScore: null });
+    const progress = (await request(learning, 'GET', '/v1/learning/courses/problem-solving', L(student))).body as CourseProgress;
+    itemId = progress.course.modules.flatMap((m) => m.items).find((i) => i.type === 'assignment')!.id;
+    const v1 = await request(learning, 'POST', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}/submissions`, { ...L(student), body: { text: canvas } });
+    submissionId = (v1.body as { id: string }).id;
+  });
+
+  it('queues the work for people who grade in the organisation, and nobody else', async () => {
+    const queue = await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher));
+    expect(queue.status).toBe(200);
+    expect((queue.body as { items: unknown[] }).items).toEqual([
+      expect.objectContaining({ submissionId, version: 1, status: 'awaiting', scorePct: null, learner: expect.objectContaining({ name: 'Sade Student' }), course: expect.objectContaining({ slug: 'problem-solving' }) }),
+    ]);
+    expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(student))).status).toBe(403);
+    expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(owner))).status).toBe(403);
+    expect((await request(learning, 'GET', `/v1/learning/grading/submissions/${submissionId}`, L(student))).status).toBe(403);
+  });
+
+  it('grades with the rubric: drafts stay private, a release counts, a regrade supersedes', async () => {
+    const view = (await request(learning, 'GET', `/v1/learning/grading/submissions/${submissionId}`, L(teacher))).body as SubmissionForGrading;
+    expect(view).toMatchObject({ status: 'awaiting', text: canvas, grade: null, versions: [{ version: 1, status: 'awaiting' }] });
+    const criteria = view.item.rubric.map((r) => r.id);
+    expect(criteria.length).toBeGreaterThan(0);
+    const url = `/v1/learning/grading/submissions/${submissionId}/grade`;
+    const all = (level: number) => Object.fromEntries(criteria.map((c) => [c, level]));
+
+    expect(await request(learning, 'PUT', url, { ...L(teacher), body: { rubricScores: { [criteria[0]!]: 3 }, release: true } })).toMatchObject({ status: 400, body: { code: 'rubric_incomplete' } });
+    expect(await request(learning, 'PUT', url, { ...L(teacher), body: { rubricScores: { ...all(3), extra: 4 }, release: true } })).toMatchObject({ status: 400 });
+
+    const draft = await request(learning, 'PUT', url, { ...L(teacher), body: { rubricScores: all(2), feedback: 'Sharpen the problem statement.', release: false } });
+    expect(draft.body).toMatchObject({ status: 'draft', grade: { scorePct: 50, releasedAt: null, graderName: 'Tayo Teacher' } });
+    const learnerView = (await request(learning, 'GET', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}`, L(student))).body as ItemView;
+    expect(learnerView.submissions[0]!.grade).toBeNull();
+
+    const released = await request(learning, 'PUT', url, { ...L(teacher), body: { rubricScores: all(3), feedback: 'Clear and well evidenced.', release: true } });
+    expect(released.body).toMatchObject({ status: 'released', grade: { scorePct: 75 }, history: [{ scorePct: 50, releasedAt: null }] });
+    const seen = (await request(learning, 'GET', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}`, L(student))).body as ItemView;
+    expect(seen.submissions[0]!.grade).toMatchObject({ scorePct: 75, feedback: 'Clear and well evidenced.' });
+
+    const regrade = await request(learning, 'PUT', url, { ...L(teacher), body: { rubricScores: all(4), feedback: 'Outstanding on a second look.', release: true } });
+    expect(regrade.body).toMatchObject({ grade: { scorePct: 100 }, history: [{ scorePct: 75 }, { scorePct: 50 }] });
+    const after = (await request(learning, 'GET', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}`, L(student))).body as ItemView;
+    expect(after.submissions[0]!.grade).toMatchObject({ scorePct: 100 });
+    // Quizzes are still to come, so the course has no final score yet.
+    expect(after.enrollment.finalScore).toBeNull();
+    expect((await request(learning, 'GET', '/v1/learning/grading/queue?status=released', L(teacher))).body).toMatchObject({ items: [{ submissionId, status: 'released', scorePct: 100 }] });
+    expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher))).body).toMatchObject({ items: [] });
+  });
+
+  it('only grades the newest version', async () => {
+    const v2 = await request(learning, 'POST', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}/submissions`, { ...L(student), body: { text: `${canvas} revised` } });
+    const v2Id = (v2.body as { id: string }).id;
+    const view = (await request(learning, 'GET', `/v1/learning/grading/submissions/${submissionId}`, L(teacher))).body as SubmissionForGrading;
+    const criteria = view.item.rubric.map((r) => r.id);
+    const rubricScores = Object.fromEntries(criteria.map((c) => [c, 3]));
+    expect(await request(learning, 'PUT', `/v1/learning/grading/submissions/${submissionId}/grade`, { ...L(teacher), body: { rubricScores, release: true } })).toMatchObject({
+      status: 409,
+      body: { code: 'not_latest_version' },
+    });
+    expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher))).body).toMatchObject({ items: [{ submissionId: v2Id, version: 2, status: 'awaiting' }] });
   });
 });

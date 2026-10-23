@@ -13,13 +13,14 @@ import type { IamConfig } from '../../../config';
 import { IamDatabase, IamTx, schema } from '../../../database';
 import { IamEvents } from '../../../events';
 import { recordConsent } from '../../auth/auth.service';
+import { MfaService } from '../../auth/services/mfa.service';
 import { SessionIssuer } from '../../auth/services/session-issuer.service';
 import { SsoPolicy } from '../../auth/services/sso-policy.service';
 import { emailDomain } from '../../auth/utils/email-domain';
 import { AuthzService } from '../../authz/authz.service';
 import { SecretBox } from '../../keys/secret-box.service';
 import type { OidcConfig, SamlConfig } from '../../organizations/entities/sso-connection.entity';
-import { UsersRepository } from '../../users/users.repository';
+import { lockUserRow, UsersRepository } from '../../users/users.repository';
 import { OidcClient, OidcError } from '../providers/oidc.client';
 import { SamlClient } from '../providers/saml.client';
 import { OIDC_CLIENT, samlEntityId, serviceProvider } from './sso-connections.service';
@@ -72,6 +73,7 @@ export class SsoSignInService {
     private readonly issuer: SessionIssuer,
     private readonly users: UsersRepository,
     private readonly authz: AuthzService,
+    private readonly mfa: MfaService,
   ) {
     this.limiter = new RedisRateLimiter(redis, 'iam:rl:');
   }
@@ -235,13 +237,23 @@ export class SsoSignInService {
       await this.ensureMembership(tx, user.id, connection, meta);
       return user;
     });
-    // The organisation's own sign-on counts as its second factor.
-    const tokens = await this.db.system((tx) => this.issuer.start(tx, user, 'sso', meta, { mfa: true, orgId: connection.orgId }));
+    // Someone with their own authenticator still confirms a code: sign-on vouches for the address,
+    // not for the person, and any organisation that verified the domain can run a sign-on.
+    if (MfaService.enabled(user)) {
+      const challenge = await this.mfa.challenge(user, 'sso', { ...meta, tenantOrgId: connection.orgId });
+      return { kind: 'mfa' as const, challenge, returnTo: pending.returnTo };
+    }
+    // Otherwise the organisation's sign-on counts as its second factor, except for platform admins,
+    // whose platform permissions need their own authenticator (they are asked to add one).
+    const mfa = !(await this.authz.isPlatformAdmin(user.id));
+    const tokens = await this.db.system((tx) => this.issuer.start(tx, user, 'sso', meta, { mfa, orgId: connection.orgId }));
     return { kind: 'session' as const, tokens, returnTo: pending.returnTo };
   }
 
   /** Sign-on is also how people join: first sign-in makes them a member with the default role. */
   private async ensureMembership(tx: IamTx, userId: string, connection: ConnectionRow, meta: RequestMeta): Promise<void> {
+    // The user's lock first: a domain join or invitation for the same person waits, and we see its result.
+    await lockUserRow(tx, userId);
     const [existing] = await tx.select().from(memberships).where(and(eq(memberships.userId, userId), eq(memberships.orgId, connection.orgId)));
     if (existing?.status === 'active') return;
     if (existing?.status === 'suspended') throw forbidden('membership_suspended', 'Your access to this organisation is paused. Ask an admin.');

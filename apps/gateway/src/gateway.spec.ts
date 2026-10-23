@@ -1,6 +1,6 @@
 import type { GatewayConfig } from './config';
 import { mergeDocuments } from './modules/docs/docs.service';
-import { isContextNeutral } from './modules/proxy/proxy.service';
+import { isAmbiguousPath, isContextNeutral } from './modules/proxy/proxy.service';
 import { originMatcher } from './cors';
 import { TenantService } from './modules/tenancy/tenancy.service';
 
@@ -77,4 +77,18 @@ describe('context-neutral paths', () => {
     ['/v1/invitations/preview/extra', false],
     ['/v1/mexico', false],
   ])('%s → %s', (path, expected) => expect(isContextNeutral(path)).toBe(expected));
+});
+
+describe('isAmbiguousPath', () => {
+  it('refuses paths the upstream would read differently from the gateway', () => {
+    for (const p of ['/scim/v2/../../v1/orgs/x', '/v1/auth/%2e%2e/orgs/x', '/v1/learning/x%2Fy', '/v1//orgs', '/v1/x/..', String.raw`/v1/a\b`, '/v1/./me']) {
+      expect(isAmbiguousPath(p)).toBe(true);
+    }
+  });
+
+  it('lets ordinary paths through', () => {
+    for (const p of ['/v1/learning/enrollments', '/v1/catalog/courses/problem-solving', '/v1/me', '/scim/v2/Users', '/.well-known/jwks.json', '/v1/files/report.v2.pdf']) {
+      expect(isAmbiguousPath(p)).toBe(false);
+    }
+  });
 });

@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # One image per service: docker build --build-arg APP=iam -t dreamlab-iam .
-ARG NODE_VERSION=24.15-alpine
+# Node 24.22.1: the October 2026 security release (Brotli RCE, TLS hostname bypasses).
+ARG NODE_VERSION=24.22.1-alpine
 
 FROM node:${NODE_VERSION} AS base
 RUN apk add --no-cache git && corepack enable

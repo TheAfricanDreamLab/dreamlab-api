@@ -7,7 +7,7 @@ import type Redis from 'ioredis';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
-import { and, arrayContains, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, arrayContains, desc, eq, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import { toOrganization, toPublicOrganization } from '../../common/mappers/organization.mapper';
 import { pageResult } from '../../common/mappers/pagination';
 import type { RequestMeta } from '../../common/interfaces/request-meta.interface';
@@ -17,7 +17,7 @@ import { IamEvents } from '../../events';
 import { AuthzService } from '../authz/authz.service';
 import type { Notifier } from '../notifications/interfaces/notifier.interface';
 import { NOTIFIER } from '../notifications/notifier.service';
-import { UsersRepository } from '../users/users.repository';
+import { lockUserRow, UsersRepository } from '../users/users.repository';
 import { pickSlug } from './utils/slug';
 
 type CreateOrg = z.infer<typeof CreateOrganizationSchema>;
@@ -75,6 +75,7 @@ export class OrganizationsService {
       }
       const [orgAdmin] = await tx.select().from(roles).where(and(eq(roles.key, 'org_admin'), eq(roles.system, true)));
       const membershipId = newId();
+      await lockUserRow(tx, user.id);
       await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId, status: 'active', source: 'self', joinedAt: new Date() });
       await tx.insert(roleAssignments).values({ id: newId(), orgId, membershipId, roleId: orgAdmin!.id, scopeType: 'org', grantedByUserId: user.id });
       await this.authz.bumpVersion(tx, [user.id]);
@@ -150,19 +151,20 @@ export class OrganizationsService {
     });
   }
 
+  /** Newest first (ids are time-ordered), so the first page always shows the latest organisations. */
   async list(query: { limit: number; cursor?: string; q?: string; kind?: string; status?: 'pending' | 'active' | 'suspended' }) {
     const rows = await this.db.sys
       .select()
       .from(organizations)
       .where(
         and(
-          query.cursor ? gt(organizations.id, query.cursor) : undefined,
+          query.cursor ? lt(organizations.id, query.cursor) : undefined,
           query.q ? or(ilike(organizations.name, likeContains(query.q)), ilike(organizations.slug, likeContains(query.q))) : undefined,
           query.status ? eq(organizations.status, query.status) : undefined,
           query.kind ? arrayContains(organizations.kinds, [query.kind]) : undefined,
         ),
       )
-      .orderBy(asc(organizations.id))
+      .orderBy(desc(organizations.id))
       .limit(query.limit + 1);
     const page = pageResult(rows, query.limit);
     return { items: page.items.map(toOrganization), nextCursor: page.nextCursor };
@@ -222,6 +224,7 @@ export class OrganizationsService {
     if (!orgAdmin) throw new Error('System roles are not seeded');
     const user = await this.users.findByEmailOrPhone(who.email ?? null, who.phone ?? null, tx);
     if (user && UsersRepository.isAnyVerified(user)) {
+      await lockUserRow(tx, user.id);
       const [membership] = await tx
         .insert(memberships)
         .values({ id: newId(), userId: user.id, orgId, status: 'active', source: 'bootstrap', joinedAt: new Date() })

@@ -22,7 +22,11 @@ export class ProgramsService {
     return this.summarize(rows.filter((r) => this.canSee(r, principal)));
   }
 
-  async get(slug: string, principal: Principal | null): Promise<ProgramDetail> {
+  /**
+   * A programme as this viewer may see it: private courses linked to it are left out for people who
+   * may not see them. `internal` (service RPC, e.g. scheduling a cohort) sees every linked course.
+   */
+  async get(slug: string, principal: Principal | null, internal = false): Promise<ProgramDetail> {
     const [row] = await this.db.sys.select().from(programs).where(eq(programs.slug, slug));
     if (!row || !this.canSee(row, principal)) throw notFound('program_not_found', 'Programme not found');
     const [summary] = await this.summarize([row]);
@@ -34,7 +38,8 @@ export class ProgramsService {
       this.db.sys.select().from(capstoneStageDefs).where(eq(capstoneStageDefs.programId, row.id)).orderBy(asc(capstoneStageDefs.position)),
       this.db.sys.select().from(programCalendarWeeks).where(eq(programCalendarWeeks.programId, row.id)).orderBy(asc(programCalendarWeeks.weekNo)),
     ]);
-    const courseRows = links.length ? await this.db.sys.select().from(courses).where(inArray(courses.id, links.map((l) => l.courseId))) : [];
+    const linked = links.length ? await this.db.sys.select().from(courses).where(inArray(courses.id, links.map((l) => l.courseId))) : [];
+    const courseRows = internal ? linked : linked.filter((c) => this.catalog.canSee(c, principal));
     const summaries = new Map((await this.catalog.summarize(courseRows)).map((s) => [s.id, s]));
     const phaseName = new Map(phases.map((p) => [p.id, p.name]));
 

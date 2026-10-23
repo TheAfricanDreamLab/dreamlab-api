@@ -19,7 +19,7 @@ import type { Notifier } from '../notifications/interfaces/notifier.interface';
 import { NOTIFIER } from '../notifications/notifier.service';
 import { channelFor } from '../notifications/utils/channel-for';
 import { maskDestination } from '../notifications/utils/mask-destination';
-import { UsersRepository } from '../users/users.repository';
+import { lockUserRow, UsersRepository } from '../users/users.repository';
 
 type CreateInvitation = z.infer<typeof CreateInvitationSchema>;
 const { invitations, memberships, roles, roleAssignments, orgUnits, organizations, users } = schema;
@@ -59,11 +59,12 @@ export class InvitationsService {
         throw conflict('org_pending', 'Your organisation is awaiting approval. Until then you can only invite co-admins.');
       }
       const found = await tx
-        .select({ key: roles.key, scopeTypes: roles.scopeTypes })
+        .select({ key: roles.key, scopeTypes: roles.scopeTypes, permissions: roles.permissions })
         .from(roles)
         .where(and(inArray(roles.key, roleKeys), or(isNull(roles.orgId), eq(roles.orgId, orgId))));
       const unknown = roleKeys.filter((k) => !found.some((f) => f.key === k && f.scopeTypes.includes('org')));
       if (unknown.length) throw badRequest('role_not_found', `Roles not assignable org-wide: ${unknown.join(', ')}`);
+      if (roleKeys.some((k) => k !== 'learner')) await this.authz.assertMayGrant(principal.userId, orgId, found.flatMap((f) => f.permissions));
       if (dto.orgUnitId) {
         const [unit] = await tx.select({ id: orgUnits.id }).from(orgUnits).where(eq(orgUnits.id, dto.orgUnitId));
         if (!unit) throw badRequest('unit_not_found', 'Org unit not found');
@@ -230,7 +231,10 @@ export class InvitationsService {
       const membershipId = existing?.id ?? newId();
       const values = { status: 'active' as const, source: 'invite' as const, orgUnitId: inv.orgUnitId, jobTitle: inv.jobTitle, joinedAt: new Date() };
       if (existing) await tx.update(memberships).set(values).where(eq(memberships.id, membershipId));
-      else await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId: inv.orgId, ...values });
+      else {
+        await lockUserRow(tx, user.id);
+        await tx.insert(memberships).values({ id: membershipId, userId: user.id, orgId: inv.orgId, ...values });
+      }
 
       const roleRows = await tx
         .select({ id: roles.id, key: roles.key })

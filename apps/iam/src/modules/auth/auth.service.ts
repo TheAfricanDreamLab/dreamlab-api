@@ -16,7 +16,9 @@ import {
   InjectRedis,
   newId,
   notFound,
+  randomToken,
   RedisRateLimiter,
+  safeEqual,
   sha256,
   tooManyRequests,
   unauthorized,
@@ -39,6 +41,10 @@ import { PERSONAL, SessionIssuer, TokenContext } from './services/session-issuer
 import { SessionRow, SessionsService } from './services/sessions.service';
 import { SsoPolicy } from './services/sso-policy.service';
 import { TokenService } from './services/token.service';
+
+/** A registration's password waits here until verify (see register); a day covers a late code. */
+export const pendingPasswordKey = (userId: string): string => `iam:pending-pw:${userId}`;
+const PENDING_PASSWORD_TTL_SECONDS = 24 * 3600;
 
 @Injectable()
 export class AuthService {
@@ -69,6 +75,11 @@ export class AuthService {
   /**
    * Create an account. Needs no organisation. An unverified account with the same identifier is
    * taken over (nobody has proven they own it yet); a verified one is a conflict.
+   *
+   * The password is not stored yet: it waits in Redis with a registration token returned to this
+   * caller, and verify applies it only when that token comes back. Otherwise someone could register
+   * another person's address with their own password and keep it once that person verifies the
+   * account (with a code, through SCIM or an invitation).
    */
   async register(dto: RegisterRequest, meta: RequestMeta) {
     const identifier = (dto.email ?? dto.phone)!;
@@ -83,7 +94,8 @@ export class AuthService {
       }
       const row = existing ?? (await this.users.create(tx, { email: dto.email ?? null, phone: dto.phone ?? null, fullName: dto.fullName, locale: dto.locale }));
       if (existing) await this.users.update(tx, row.id, { fullName: dto.fullName, locale: dto.locale });
-      await this.users.setPassword(tx, row.id, passwordHash);
+      // A password set before the account was proven is never trusted.
+      await this.users.dropPassword(tx, row.id);
       await this.recordConsent(tx, row.id, dto.consent, meta);
       if (!existing) {
         await this.outbox.add(tx, {
@@ -96,8 +108,10 @@ export class AuthService {
       return row;
     });
 
+    const registrationToken = randomToken();
+    await this.redis.set(pendingPasswordKey(user.id), JSON.stringify({ token: sha256(registrationToken), hash: passwordHash }), 'EX', PENDING_PASSWORD_TTL_SECONDS);
     const verification = await this.otp.issue('verify', identifier);
-    return { userId: user.id, verification };
+    return { userId: user.id, verification, registrationToken };
   }
 
   /** Always answers the same way, so it cannot be used to discover accounts. */
@@ -121,12 +135,18 @@ export class AuthService {
     return { accepted: true as const, expiresInSeconds: this.config.OTP_TTL_SECONDS };
   }
 
-  async verify(identifier: string, code: string, meta: RequestMeta): Promise<SignInResponse> {
+  async verify(identifier: string, code: string, meta: RequestMeta, registrationToken?: string): Promise<SignInResponse> {
     const user = await this.users.findByIdentifier(identifier);
     if (!user) throw badRequest('otp_invalid', 'The code is invalid or has expired');
     this.assertOtp(await this.otp.verify('verify', identifier, code));
     this.assertActive(user);
+    const pending = await this.takePendingPassword(user.id);
     return this.db.system(async (tx) => {
+      if (!UsersRepository.isAnyVerified(user)) {
+        // The first proof of ownership: keep the password only if this caller is who registered.
+        await this.users.dropPassword(tx, user.id);
+        if (pending && registrationToken && safeEqual(pending.token, sha256(registrationToken))) await this.users.setPassword(tx, user.id, pending.hash);
+      }
       await this.users.markVerified(tx, user.id, identifier);
       await this.outbox.add(tx, {
         type: IamEvents.UserVerified,
@@ -136,6 +156,16 @@ export class AuthService {
       });
       return this.signIn(tx, user, 'verify', meta);
     });
+  }
+
+  /** The password waiting from registration, removed as it is read (it can be used once). */
+  private async takePendingPassword(userId: string): Promise<{ token: string; hash: string } | null> {
+    const raw = await this.redis.getdel(pendingPasswordKey(userId));
+    try {
+      return raw ? (JSON.parse(raw) as { token: string; hash: string }) : null;
+    } catch {
+      return null;
+    }
   }
 
   // ---------- sign-in ----------
@@ -156,7 +186,7 @@ export class AuthService {
     await this.limiter.reset(`login-fail:${idKey}`);
     this.assertActive(user);
     // Only after the password is proven, so the policy check cannot be used to probe accounts.
-    await this.ssoPolicy.assertNotEnforced(identifier, await this.authz.isPlatformAdmin(user.id));
+    await this.ssoPolicy.assertNotEnforced(user.email ?? identifier, await this.authz.isPlatformAdmin(user.id));
     if (!UsersRepository.isVerified(user, identifier)) {
       throw forbidden('account_unverified', 'Verify your email or phone first: request a code with purpose "verify"');
     }
@@ -169,9 +199,11 @@ export class AuthService {
     if (!user) throw badRequest('otp_invalid', 'The code is invalid or has expired');
     this.assertOtp(await this.otp.verify('login', identifier, code));
     this.assertActive(user);
-    await this.ssoPolicy.assertNotEnforced(identifier, await this.authz.isPlatformAdmin(user.id));
+    await this.ssoPolicy.assertNotEnforced(user.email ?? identifier, await this.authz.isPlatformAdmin(user.id));
+    if (!UsersRepository.isAnyVerified(user)) await this.takePendingPassword(user.id);
     return this.db.system(async (tx) => {
-      // Receiving the code proves control of the identifier.
+      // Receiving the code proves control of the identifier, not that this person chose the password.
+      if (!UsersRepository.isAnyVerified(user)) await this.users.dropPassword(tx, user.id);
       if (!UsersRepository.isVerified(user, identifier)) await this.users.markVerified(tx, user.id, identifier);
       return this.signIn(tx, user, 'otp', meta);
     });
@@ -278,6 +310,7 @@ export class AuthService {
     if (!user) throw badRequest('otp_invalid', 'The code is invalid or has expired');
     this.assertOtp(await this.otp.verify('reset', identifier, code));
     const hash = await this.passwords.hash(newPassword);
+    await this.takePendingPassword(user.id);
     await this.db.system(async (tx) => {
       await this.users.setPassword(tx, user.id, hash);
       // Possession of the code also proves control of the identifier.

@@ -64,6 +64,11 @@ export class UsersRepository {
       });
   }
 
+  /** Remove the password sign-in (used for passwords nobody has proven they set: see AuthService.register). */
+  async dropPassword(tx: IamTx, userId: string): Promise<void> {
+    await tx.delete(userIdentities).where(and(eq(userIdentities.userId, userId), eq(userIdentities.provider, 'password')));
+  }
+
   async markVerified(tx: IamTx, userId: string, identifier: string): Promise<void> {
     await tx
       .update(users)
@@ -78,4 +83,13 @@ export class UsersRepository {
   static isAnyVerified(user: UserRow): boolean {
     return user.emailVerifiedAt !== null || user.phoneVerifiedAt !== null;
   }
+}
+
+/**
+ * Lock a user's row for the rest of the transaction. Taken by everything that adds someone to an
+ * organisation and by SCIM before it changes an account, so "does this person belong elsewhere?"
+ * can't change between SCIM's check and its update.
+ */
+export async function lockUserRow(tx: IamTx, userId: string): Promise<void> {
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for('update');
 }

@@ -14,7 +14,7 @@ import { pageResult } from '../../common/mappers/pagination';
 import type { IamConfig } from '../../config';
 import { IamDatabase, IamTx, schema } from '../../database';
 import { IamEvents } from '../../events';
-import { AuthzService } from '../authz/authz.service';
+import { activeAssignment, AuthzService } from '../authz/authz.service';
 import { MembershipLoader } from './services/membership-loader.service';
 
 const { memberships, users, roleAssignments, roles, orgUnits, groups, organizations } = schema;
@@ -77,6 +77,7 @@ export class MembersService {
         if (!unit) throw badRequest('unit_not_found', 'Org unit not found');
         await this.assertUnitPermission(principal, orgId, 'org.members.update', dto.orgUnitId);
       }
+      if (dto.status !== undefined || dto.orgUnitId !== undefined) await this.assertOutranks(tx, principal, orgId, membershipId);
       if (dto.status === 'suspended' && current.userId === principal.userId) {
         throw badRequest('cannot_suspend_self', 'You cannot suspend yourself');
       }
@@ -99,6 +100,7 @@ export class MembersService {
     await this.db.tenant({ orgId, userId: principal.userId }, async (tx) => {
       const [current] = await tx.select().from(memberships).where(eq(memberships.id, membershipId));
       if (!current || current.status === 'left') throw notFound('member_not_found', 'Member not found');
+      await this.assertOutranks(tx, principal, orgId, membershipId);
       await this.assertNotLastAdmin(tx, orgId, membershipId);
       await tx.update(memberships).set({ status: 'left' }).where(eq(memberships.id, membershipId));
       await tx.delete(roleAssignments).where(eq(roleAssignments.membershipId, membershipId));
@@ -114,6 +116,16 @@ export class MembersService {
     });
   }
 
+  /** Suspending, moving or removing someone needs every permission they hold (no acting on people above you). */
+  private async assertOutranks(tx: IamTx, principal: Principal, orgId: string, membershipId: string): Promise<void> {
+    const held = await tx
+      .select({ permissions: roles.permissions })
+      .from(roleAssignments)
+      .innerJoin(roles, eq(roles.id, roleAssignments.roleId))
+      .where(and(eq(roleAssignments.membershipId, membershipId), activeAssignment()));
+    await this.authz.assertMayGrant(principal.userId, orgId, held.flatMap((h) => h.permissions));
+  }
+
   async assignRole(principal: Principal, orgId: string, membershipId: string, dto: AssignRole, meta: RequestMeta) {
     return this.db.tenant({ orgId, userId: principal.userId }, async (tx) => {
       const [member] = await tx.select().from(memberships).where(eq(memberships.id, membershipId));
@@ -127,6 +139,7 @@ export class MembersService {
         throw badRequest('scope_not_allowed', `Role ${role.key} can be assigned at: ${role.scopeTypes.join(', ')}`);
       }
       if (role.key === 'platform_admin') await this.assertPlatformOrg(tx, orgId, principal);
+      else await this.authz.assertMayGrant(principal.userId, orgId, role.permissions);
       const scopeId = dto.scopeType === 'org' ? null : dto.scopeId;
       if (dto.scopeType !== 'org' && !scopeId) throw badRequest('scope_id_required', 'scopeId is required for this scope');
       if (dto.scopeType === 'org_unit') {

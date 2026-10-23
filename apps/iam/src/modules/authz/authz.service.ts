@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PERMISSIONS, Permission, ScopeType } from '@dreamlab/contracts';
 import { authzVersionKey, orgPermissions, Principal } from '@lib/auth';
-import { InjectRedis } from '@lib/common';
+import { forbidden, InjectRedis } from '@lib/common';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { and, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
@@ -15,7 +15,7 @@ const GRANTS_TTL_SECONDS = 60;
 const { memberships, roleAssignments, roles, users, organizations, orgUnits } = schema;
 
 /** Is this assignment in force right now? */
-const activeAssignment = () =>
+export const activeAssignment = () =>
   and(
     or(isNull(roleAssignments.startsAt), lte(roleAssignments.startsAt, sql`now()`)),
     or(isNull(roleAssignments.endsAt), gt(roleAssignments.endsAt, sql`now()`)),
@@ -170,6 +170,19 @@ export class AuthzService {
       .from(orgUnits)
       .where(and(eq(orgUnits.id, unitId), eq(orgUnits.orgId, orgId)));
     return row?.path ?? null;
+  }
+
+  /**
+   * No escalation: a grantor hands out only permissions they hold org-wide themselves. Org admins and
+   * platform admins may grant any organisation role.
+   */
+  async assertMayGrant(userId: string, orgId: string, permissions: readonly string[]): Promise<void> {
+    if (await this.isPlatformAdmin(userId)) return;
+    const orgGrants = ((await this.orgAccess(userId, orgId))?.grants ?? []).filter((g) => g.scopeType === 'org');
+    if (orgGrants.some((g) => g.roleKey === 'org_admin')) return;
+    const held = new Set<string>(orgGrants.flatMap((g) => g.permissions));
+    const missing = [...new Set(permissions)].filter((p) => !held.has(p));
+    if (missing.length > 0) throw forbidden('grant_exceeds_own', `You can only grant permissions you hold yourself. Missing: ${missing.join(', ')}`);
   }
 
   /** Permissions held org-wide in the principal's active context (for /me and UI). */

@@ -50,6 +50,14 @@ export class OidcClient {
     if (trimSlash(String(doc.issuer ?? '')) !== key) throw new OidcError('The OpenID configuration names a different issuer');
     for (const field of ['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as const) {
       if (typeof doc[field] !== 'string') throw new OidcError(`The OpenID configuration has no ${field}`);
+      // Browsers are sent to the authorization endpoint: only https (http on private test networks), never javascript: or data:.
+      let scheme: string;
+      try {
+        scheme = new URL(doc[field]).protocol;
+      } catch {
+        throw new OidcError(`The OpenID configuration's ${field} is not a URL`);
+      }
+      if (scheme !== 'https:' && !(this.allowPrivate && scheme === 'http:')) throw new OidcError(`The OpenID configuration's ${field} is not an https URL`);
     }
     this.discoveries.set(key, { at: Date.now(), value: doc });
     return doc;

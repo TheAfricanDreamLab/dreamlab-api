@@ -10,7 +10,7 @@ import { IamDatabase, IamTx, schema } from '../../database';
 import { IamEvents } from '../../events';
 import { emailDomain, PUBLIC_EMAIL_DOMAINS } from '../auth/utils/email-domain';
 import { AuthzService } from '../authz/authz.service';
-import { UsersRepository } from '../users/users.repository';
+import { lockUserRow, UsersRepository } from '../users/users.repository';
 import { hasVerificationRecord, TRUST_ALL_DOMAINS, TxtLookup, verificationRecordName, verificationRecordValue } from './utils/dns-txt';
 
 export const TXT_LOOKUP = Symbol('TXT_LOOKUP');
@@ -138,6 +138,7 @@ export class DomainsService {
     if (!offer) throw forbidden('join_not_allowed', 'Your email address doesn’t let you join this organisation.');
     const status = offer.joinPolicy === 'auto' ? ('active' as const) : ('requested' as const);
     return this.db.system(async (tx) => {
+      await lockUserRow(tx, principal.userId);
       const membershipId = newId();
       const inserted = await tx
         .insert(memberships)

@@ -4,4 +4,5 @@ export const LearningEvents = {
   ItemCompleted: 'learning_item.completed',
   CourseCompleted: 'course_enrollment.completed',
   SubmissionCreated: 'submission.created',
+  GradeReleased: 'grade.released',
 } as const;

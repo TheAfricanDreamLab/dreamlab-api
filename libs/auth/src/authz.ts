@@ -18,6 +18,11 @@ export interface AuthzCheckRequest {
   anyScope?: boolean;
   /** The caller's authorization version, so cached answers die when roles change. */
   authzVersion: number;
+  /**
+   * The token's roles are known to be out of date (Principal.stale): ask IAM afresh. Its version is
+   * the old one, so a cached answer under that version could still say yes to a revoked role.
+   */
+  fresh?: boolean;
 }
 
 export interface AuthzCheckResponse {
@@ -53,13 +58,13 @@ export class RpcAuthzChecker implements AuthzChecker {
 
   async check(request: AuthzCheckRequest): Promise<boolean> {
     const key = authzCacheKey(request);
-    const cached = await this.redis?.get(key).catch(() => null);
+    const cached = request.fresh ? null : await this.redis?.get(key).catch(() => null);
     if (cached === '1' || cached === '0') return cached === '1';
     try {
       const res = await firstValueFrom(
         this.client.send<AuthzCheckResponse, AuthzCheckRequest>(AUTHZ_CHECK_PATTERN, request).pipe(timeout(this.timeoutMs)),
       );
-      await this.redis?.set(key, res.allowed ? '1' : '0', 'EX', this.ttlSeconds).catch(() => undefined);
+      if (!request.fresh) await this.redis?.set(key, res.allowed ? '1' : '0', 'EX', this.ttlSeconds).catch(() => undefined);
       return res.allowed;
     } catch (err) {
       this.logger.error(`Authorization check failed closed: ${err instanceof Error ? err.message : String(err)}`);

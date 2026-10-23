@@ -22,7 +22,7 @@ export class CatalogRpcController {
   @MessagePattern(CatalogRpc.ProgramDetail)
   program(@Payload() payload: unknown) {
     const p = SlugPayload.safeParse(payload);
-    return p.success ? this.programs.get(p.data.slug, null).catch(() => null) : null;
+    return p.success ? this.programs.get(p.data.slug, null, true).catch(() => null) : null;
   }
 
   @MessagePattern(CatalogRpc.CourseContent)

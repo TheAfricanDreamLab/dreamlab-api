@@ -7,17 +7,20 @@ import { LearningStatsService } from './admin/learning-stats.service';
 import { CohortsController, ProgramsController } from './cohorts/cohorts.controller';
 import { CohortsService } from './cohorts/cohorts.service';
 import { ProgramsService } from './cohorts/programs.service';
+import { GradingController } from './grading/grading.controller';
+import { GradingService } from './grading/grading.service';
 import { EnrollmentsController } from './enrollments/enrollments.controller';
 import { CATALOG, EnrollmentsService } from './enrollments/enrollments.service';
 import { PlayerController } from './player/player.controller';
 import { IAM_NAMES, PlayerService } from './player/player.service';
 
 @Module({
-  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController],
+  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController],
   providers: [
     EnrollmentsService,
     CohortsService,
     ProgramsService,
+    GradingService,
     PlayerService,
     LearningStatsService,
     { provide: CATALOG, inject: [CONFIG], useFactory: (c: LearningConfig) => new CatalogClient(new RpcClient(c.RABBITMQ_URL, CATALOG_RPC_QUEUE)) },

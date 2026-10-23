@@ -61,7 +61,8 @@ export class SsoPolicy {
 
   /**
    * Refuse passwords, codes and Google for addresses whose organisation enforces sign-on. Platform
-   * admins are exempt, so an identity-provider outage cannot lock the platform out.
+   * admins are exempt, so an identity-provider outage cannot lock the platform out. Once the account
+   * is known, callers pass its email (not the phone typed), so a phone number is no way round it.
    */
   async assertNotEnforced(identifier: string, isPlatformAdmin = false): Promise<void> {
     if (isPlatformAdmin || !identifier.includes('@')) return;

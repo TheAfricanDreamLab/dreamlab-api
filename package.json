@@ -7,7 +7,7 @@
   "author": "African Dream Network",
   "packageManager": "pnpm@10.33.2",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "build": "nest build gateway && nest build iam && nest build catalog && nest build learning",
@@ -38,7 +38,7 @@
     "learning:generate": "drizzle-kit generate --config apps/learning/drizzle.config.ts"
   },
   "dependencies": {
-    "@dreamlab/contracts": "github:TheAfricanDreamLab/dreamlab-contracts#v0.10.0",
+    "@dreamlab/contracts": "github:TheAfricanDreamLab/dreamlab-contracts#v0.11.0",
     "@fastify/static": "10.1.6",
     "@nestjs/common": "11.2.7",
     "@nestjs/core": "11.2.7",

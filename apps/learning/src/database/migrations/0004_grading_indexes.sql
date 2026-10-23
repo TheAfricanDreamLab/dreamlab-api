@@ -1,0 +1,2 @@
+CREATE INDEX "grades_submission_time" ON "grades" USING btree ("submission_id","created_at");--> statement-breakpoint
+CREATE INDEX "submissions_context_kind_time" ON "submissions" USING btree ("context_org_id","kind","submitted_at");
