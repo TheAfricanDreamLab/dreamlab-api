@@ -686,6 +686,8 @@ describe('course authoring in the browser (CAT-3)', () => {
     expect(saved.body).toMatchObject({ revision: 2, issues: [], doc: { slug } });
     expect((await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 1, doc: fullCourse('org_private') } })).body).toMatchObject({ code: 'draft_changed' });
     expect((await request(catalog, 'GET', url(draft.id), L(outsider))).status).toBe(404);
+    // The platform team reviews public courses only; an organisation's private draft isn't theirs.
+    expect((await request(catalog, 'GET', url(draft.id), L(admin))).status).toBe(404);
   });
 
   it('a reviewer asks for changes, then publishes; members see the private course, others do not', async () => {
@@ -696,6 +698,7 @@ describe('course authoring in the browser (CAT-3)', () => {
 
     const queue = (await request(catalog, 'GET', '/v1/catalog/authoring', L(owner))).body as { toReview: Draft[]; can: { review: boolean } };
     expect(queue).toMatchObject({ can: { review: true }, toReview: [{ id: draft!.id, status: 'in_review' }] });
+    expect((await request(catalog, 'POST', url(draft!.id, '/request-changes'), { ...L(owner), body: { note: ' ' } })).status).toBe(400);
     const returned = await request(catalog, 'POST', url(draft!.id, '/request-changes'), { ...L(owner), body: { note: 'Add a safety step.' } });
     expect(returned.body).toMatchObject({ status: 'changes_requested', reviewNote: 'Add a safety step.', reviewedBy: { name: 'Osa Owner' } });
 

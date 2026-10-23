@@ -90,7 +90,7 @@ export class AuthoringService {
     let values: Pick<DraftRow, 'courseId' | 'slug' | 'title' | 'visibility' | 'doc' | 'baseVersionNo' | 'ownerOrgId'>;
     if (input.courseSlug) {
       const [course] = await this.db.sys.select().from(courses).where(eq(courses.slug, input.courseSlug));
-      if (!course || (course.ownerOrgId !== orgId && !(p.platformAdmin && !p.stale))) throw notFound('course_not_found', 'Course not found');
+      if (!course || course.ownerOrgId !== orgId) throw notFound('course_not_found', 'Course not found');
       const { doc, versionNo } = await this.export(course);
       values = { courseId: course.id, slug: course.slug, title: course.title, visibility: course.visibility, doc, baseVersionNo: versionNo, ownerOrgId: course.ownerOrgId };
     } else {
@@ -138,7 +138,8 @@ export class AuthoringService {
       tx
         .update(courseDrafts)
         .set({ doc, title, visibility, revision: draft.revision + 1, updatedByUserId: p.userId, updatedAt: new Date() })
-        .where(and(eq(courseDrafts.id, draft.id), eq(courseDrafts.revision, input.revision)))
+        // Revision and status in one statement: a save can't land after the draft went for review.
+        .where(and(eq(courseDrafts.id, draft.id), eq(courseDrafts.revision, input.revision), inArray(courseDrafts.status, ['draft', 'changes_requested'])))
         .returning(),
     );
     if (!row) throw conflict('draft_changed', 'Someone saved this draft after you opened it. Reload to see their changes, then make yours again.');
@@ -150,7 +151,8 @@ export class AuthoringService {
     if (!(await this.canEdit(p, draft))) throw forbidden('permission_denied', 'Only the course’s authors can send it for review.');
     if (draft.status !== 'draft' && draft.status !== 'changes_requested') throw conflict('draft_not_editable', 'This draft is not open for editing.');
     if (draftIssues(draft.doc).length > 0) throw conflict('draft_has_issues', 'Fix the issues listed before sending it for review.');
-    return this.transition(p, draft, { status: 'in_review', submittedByUserId: p.userId, submittedAt: new Date() }, ['draft', 'changes_requested']);
+    // The revision that was checked is the one that goes for review.
+    return this.transition(p, draft, { status: 'in_review', submittedByUserId: p.userId, submittedAt: new Date() }, ['draft', 'changes_requested'], draft.revision);
   }
 
   async withdraw(p: Principal, draftId: string): Promise<Draft> {
@@ -177,8 +179,16 @@ export class AuthoringService {
       if (!locked || locked.status !== 'in_review') throw conflict('draft_not_in_review', 'This draft is not waiting for review.');
       const parsed = CourseAuthoringSchema.safeParse(locked.doc);
       if (!parsed.success || draftIssues(locked.doc).length > 0) throw conflict('draft_has_issues', 'This draft has issues to fix before it can be published.');
-      const [before] = await tx.select({ visibility: courses.visibility }).from(courses).where(eq(courses.slug, locked.slug));
-      const result = await this.importer.importCourse(parsed.data, locked.ownerOrgId);
+      const [before] = await tx.select({ visibility: courses.visibility, currentVersionId: courses.currentVersionId }).from(courses).where(eq(courses.slug, locked.slug));
+      // A draft started from an older version would undo what was published since: refuse it.
+      const [current] = before?.currentVersionId
+        ? await tx.select({ versionNo: courseVersions.versionNo }).from(courseVersions).where(eq(courseVersions.id, before.currentVersionId))
+        : [];
+      if ((current?.versionNo ?? null) !== locked.baseVersionNo) {
+        throw conflict('draft_stale', `Version ${current?.versionNo ?? 'new'} was published after this draft started. Start a new draft from it and make your changes there.`);
+      }
+      // In this transaction, so the new version and the draft's publication commit together.
+      const result = await this.importer.importCourse(parsed.data, locked.ownerOrgId, false, tx);
       const [course] = await tx.select({ id: courses.id }).from(courses).where(eq(courses.slug, locked.slug));
       // A course that becomes public through review joins the public catalogue (new courses are listed by the importer).
       if (course && before && before.visibility !== 'public' && parsed.data.visibility === 'public') {
@@ -217,15 +227,26 @@ export class AuthoringService {
   /** The organisation the caller authors for: the active one, or the platform's for platform admins with none. */
   private async homeOrg(p: Principal): Promise<string> {
     if (p.orgId) return p.orgId;
-    if (p.platformAdmin) return this.importer.resolveOwner(this.config.CATALOG_SEED_OWNER_SLUG);
+    if (p.platformAdmin) return this.platformOrg();
     throw forbidden('org_context_required', 'Switch to the organisation whose courses you write.');
   }
 
-  /** A draft the caller may see: their organisation's, or (platform admins) any. Others: not found. */
+  private platformOrgId: string | null = null;
+  private async platformOrg(): Promise<string> {
+    this.platformOrgId ??= await this.importer.resolveOwner(this.config.CATALOG_SEED_OWNER_SLUG);
+    return this.platformOrgId;
+  }
+
+  /** The platform team reviews public courses from every organisation; nothing else of theirs. */
+  private platformReviewer(p: Principal, draft: DraftRow): boolean {
+    return p.platformAdmin && !p.stale && draft.visibility === 'public';
+  }
+
+  /** A draft the caller may see: their organisation's (as author or reviewer), or a public one for the platform team. Others: not found. */
   private async visible(p: Principal, draftId: string): Promise<DraftRow> {
     const [draft] = await this.db.sys.select().from(courseDrafts).where(eq(courseDrafts.id, draftId));
     if (!draft) throw notFound('draft_not_found', 'Draft not found');
-    const allowed = (p.platformAdmin && !p.stale) || (await this.canEdit(p, draft)) || (await this.may(p, draft.ownerOrgId, 'course.publish'));
+    const allowed = this.platformReviewer(p, draft) || (await this.canEdit(p, draft)) || (await this.may(p, draft.ownerOrgId, 'course.publish'));
     if (!allowed) throw notFound('draft_not_found', 'Draft not found');
     return draft;
   }
@@ -236,8 +257,7 @@ export class AuthoringService {
 
   /** Public courses join the platform catalogue, so platform admins review them; others, the owner's reviewers. */
   private async canReview(p: Principal, draft: DraftRow): Promise<boolean> {
-    if (p.platformAdmin && !p.stale) return true;
-    if (draft.visibility === 'public') return false;
+    if (draft.visibility === 'public') return this.platformReviewer(p, draft);
     return this.may(p, draft.ownerOrgId, 'course.publish');
   }
 
@@ -245,10 +265,13 @@ export class AuthoringService {
     return draft.visibility === 'public' ? 'Courses for the public catalogue are reviewed by the platform team.' : 'Publishing needs the right to publish courses.';
   }
 
-  /** Org-wide in the organisation: from the token's roles when they can be trusted, otherwise IAM decides. */
+  /**
+   * Org-wide in the organisation the caller is working in (their active one; for platform admins with
+   * none, the platform's): from the token's roles when they can be trusted, otherwise IAM decides.
+   */
   private async may(p: Principal, orgId: string, permission: Permission): Promise<boolean> {
+    if (orgId !== (await this.homeOrg(p).catch(() => null))) return false;
     if (p.platformAdmin && !p.stale) return true;
-    if (p.orgId !== orgId) return false;
     if (hasOrgPermission(p, permission)) return true;
     if (!this.authz) return false;
     return this.authz.check({ userId: p.userId, orgId, permission, authzVersion: p.authzVersion, fresh: p.stale });
@@ -256,12 +279,13 @@ export class AuthoringService {
 
   // ---------- documents ----------
 
-  private async transition(p: Principal, draft: DraftRow, set: Partial<DraftRow>, from: DraftRow['status'][]): Promise<Draft> {
+  /** Status changes are conditional on the status (and, when given, the revision) the caller acted on. */
+  private async transition(p: Principal, draft: DraftRow, set: Partial<DraftRow>, from: DraftRow['status'][], revision?: number): Promise<Draft> {
     const [row] = await this.db.system((tx) =>
       tx
         .update(courseDrafts)
         .set({ ...set, updatedAt: new Date() })
-        .where(and(eq(courseDrafts.id, draft.id), inArray(courseDrafts.status, from)))
+        .where(and(eq(courseDrafts.id, draft.id), inArray(courseDrafts.status, from), revision === undefined ? undefined : eq(courseDrafts.revision, revision)))
         .returning(),
     );
     if (!row) throw conflict('draft_changed', 'This draft changed in the meantime. Reload it.');

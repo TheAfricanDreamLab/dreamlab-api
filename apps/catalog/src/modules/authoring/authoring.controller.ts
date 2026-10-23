@@ -4,7 +4,7 @@ import { apiV1Contract } from '@dreamlab/contracts';
 import { Authenticated, CurrentPrincipal, Principal } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { AuthoringService } from './authoring.service';
-import { AuthoringOverviewDto, CreateDraftDto, DraftDto, DraftParamsDto, EmptyBodyDto, ReviewNoteDto, SaveDraftDto } from './dto/authoring.dto';
+import { AuthoringOverviewDto, CreateDraftDto, DraftDto, DraftParamsDto, EmptyBodyDto, RequestChangesDto, ReviewNoteDto, SaveDraftDto } from './dto/authoring.dto';
 
 const r = apiV1Contract.authoring;
 
@@ -69,7 +69,7 @@ export class AuthoringController {
   @Authenticated()
   @ApiOperation({ summary: r.requestChanges.summary })
   @ZodResponse({ status: 200, type: DraftDto })
-  requestChanges(@Param() p: DraftParamsDto, @Body() dto: ReviewNoteDto, @CurrentPrincipal() principal: Principal) {
+  requestChanges(@Param() p: DraftParamsDto, @Body() dto: RequestChangesDto, @CurrentPrincipal() principal: Principal) {
     return this.authoring.requestChanges(principal, p.draftId, dto.note);
   }
 
