@@ -7,6 +7,7 @@ import { CatalogClient, IamRpc, RpcClient, UserName } from '@lib/rpc';
 import { and, asc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
 import { LearningDatabase, schema } from '../../database';
 import { CATALOG } from '../enrollments/enrollments.service';
+import { programmeScore } from '../grading/course-score';
 import { IAM_NAMES } from '../player/player.service';
 import { addDays, assertTimeZone, dateInWeek, todayIn, weekOf, zonedTime } from './calendar-time';
 
@@ -262,7 +263,7 @@ export class CohortsService {
     const learners = await this.db.sys.select().from(programEnrollments).where(eq(programEnrollments.cohortId, cohort.id)).orderBy(asc(programEnrollments.enrolledAt));
     if (learners.length === 0) return { items: [] };
     const ids = learners.map((l) => l.id);
-    const [held, attended, progress, names] = await Promise.all([
+    const [held, attended, progress, scores, names] = await Promise.all([
       this.heldCount(cohort.id),
       this.db.sys
         .select({ e: attendance.programEnrollmentId, n: sql<number>`count(*)::int` })
@@ -274,6 +275,11 @@ export class CohortsService {
         .from(courseEnrollments)
         .where(inArray(courseEnrollments.programEnrollmentId, ids))
         .groupBy(courseEnrollments.programEnrollmentId),
+      this.db.sys
+        .select({ e: courseEnrollments.programEnrollmentId, score: courseEnrollments.finalScore, credits: courseRuns.creditHours })
+        .from(courseEnrollments)
+        .innerJoin(courseRuns, eq(courseRuns.id, courseEnrollments.courseRunId))
+        .where(inArray(courseEnrollments.programEnrollmentId, ids)),
       this.userNames(learners.map((l) => l.userId)),
     ]);
     const attendedBy = new Map(attended.map((r) => [r.e, r.n]));
@@ -286,6 +292,7 @@ export class CohortsService {
         enrolledAt: l.enrolledAt.toISOString(),
         attendancePct: held > 0 ? Math.round(((attendedBy.get(l.id) ?? 0) / held) * 100) : null,
         progressPct: progressBy.get(l.id) ?? 0,
+        programmeScore: programmeScore(scores.filter((s) => s.e === l.id).map((s) => ({ credits: s.credits, score: s.score }))).programmeScore,
       })),
     };
   }

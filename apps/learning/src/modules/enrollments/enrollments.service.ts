@@ -31,6 +31,7 @@ export function toEnrollment(r: EnrollmentRow): Enrollment {
     enrolledAt: r.enrolledAt.toISOString(),
     lastActiveAt: r.lastActiveAt.toISOString(),
     completedAt: r.completedAt?.toISOString() ?? null,
+    finalScore: r.finalScore ?? null,
   };
 }
 

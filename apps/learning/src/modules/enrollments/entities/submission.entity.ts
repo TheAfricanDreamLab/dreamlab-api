@@ -30,5 +30,7 @@ export const submissions = pgTable(
   (t) => [
     index('submissions_enrollment_item').on(t.courseEnrollmentId, t.contentItemId),
     index('submissions_course_item_block').on(t.courseId, t.itemKey, t.blockId),
+    /** The grading queue: an organisation's assignment submissions, newest first. */
+    index('submissions_context_kind_time').on(t.contextOrgId, t.kind, t.submittedAt),
   ],
 );

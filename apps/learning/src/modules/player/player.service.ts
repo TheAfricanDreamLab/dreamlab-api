@@ -7,6 +7,7 @@ import {
   ItemState,
   ItemView,
   QuizAttempt,
+  ReleasedGrade,
   toDeliveryContent,
 } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
@@ -19,6 +20,7 @@ import { LearningDatabase, LearningTx, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, EnrollmentRow, flatItems, learnerCtx, toEnrollment } from '../enrollments/enrollments.service';
 import { checkBlock, findBlock, gradeQuiz, interactiveBlocks, isSettled, wordCount } from './grading';
+import { courseFinalScore, itemScores, releasedGrades } from '../grading/course-score';
 
 export const IAM_NAMES = Symbol('IAM_NAMES');
 
@@ -50,13 +52,14 @@ export class PlayerService {
       await tx.update(courseEnrollments).set({ lastActiveAt: new Date() }).where(eq(courseEnrollments.id, enrollment.id));
       return this.ensureProgress(tx, p, enrollment, item);
     });
-    const mine = await this.db.tenant(learnerCtx(p), (tx) =>
-      tx
+    const { mine, graded } = await this.db.tenant(learnerCtx(p), async (tx) => {
+      const rows = await tx
         .select()
         .from(submissions)
         .where(and(eq(submissions.courseEnrollmentId, enrollment.id), eq(submissions.contentItemId, item.id), inArray(submissions.kind, ['quiz', 'assignment'])))
-        .orderBy(asc(submissions.submittedAt)),
-    );
+        .orderBy(asc(submissions.submittedAt));
+      return { mine: rows, graded: await releasedGrades(tx, rows.filter((s) => s.kind === 'assignment').map((s) => s.id)) };
+    });
     const all = flatItems(content);
     const at = all.findIndex((i) => i.id === item.id);
     const nav = (i: (typeof all)[number] | undefined) => (i ? { id: i.id, title: i.title, type: i.type } : null);
@@ -69,7 +72,7 @@ export class PlayerService {
       status: progress.status,
       state: progress.state,
       quizAttempts: mine.filter((s) => s.kind === 'quiz').map((s) => this.toAttempt(s)),
-      submissions: mine.filter((s) => s.kind === 'assignment').map((s) => this.toSubmission(s)),
+      submissions: mine.filter((s) => s.kind === 'assignment').map((s) => this.toSubmission(s, graded.get(s.id) ?? null)),
       discussion: item.type === 'discussion' ? await this.discussion(p, enrollment, item) : null,
       previous: nav(all[at - 1]),
       next: nav(all[at + 1]),
@@ -342,7 +345,7 @@ export class PlayerService {
     if (finished) {
       patch.status = 'completed';
       patch.completedAt = new Date();
-      patch.finalScore = await this.finalScore(tx, enrollment, content);
+      patch.finalScore = courseFinalScore(content, await itemScores(tx, enrollment.id));
       patch.passed = true;
     }
     const [fresh] = await tx.update(courseEnrollments).set(patch).where(eq(courseEnrollments.id, enrollment.id)).returning();
@@ -363,21 +366,6 @@ export class PlayerService {
       });
     }
     return { status: 'completed' as const, enrollment: toEnrollment(fresh!), courseCompleted: finished };
-  }
-
-  /** Weighted best quiz scores (assignments count once a human releases their grade). */
-  private async finalScore(tx: LearningTx, enrollment: EnrollmentRow, content: CourseContent): Promise<number | null> {
-    const weighted = flatItems(content).filter((i) => i.type === 'quiz' && i.gradeWeight > 0);
-    if (weighted.length === 0) return null;
-    const best = await tx
-      .select({ item: submissions.contentItemId, score: sql<number>`max(${grades.score})::float` })
-      .from(grades)
-      .innerJoin(submissions, eq(submissions.id, grades.submissionId))
-      .where(and(eq(submissions.courseEnrollmentId, enrollment.id), eq(submissions.kind, 'quiz')))
-      .groupBy(submissions.contentItemId);
-    const total = weighted.reduce((n, i) => n + i.gradeWeight, 0);
-    const score = weighted.reduce((n, i) => n + (best.find((b) => b.item === i.id)?.score ?? 0) * i.gradeWeight, 0) / total;
-    return Math.round(score * 10) / 10;
   }
 
   private async locate(p: Principal, enrollmentId: string, itemId: string): Promise<Located> {
@@ -407,8 +395,8 @@ export class PlayerService {
     return { attemptNo: s.attemptNo, scorePct: r.scorePct, passed: r.passed, results: r.results, submittedAt: s.submittedAt.toISOString() };
   }
 
-  private toSubmission(s: typeof submissions.$inferSelect): AssignmentSubmission {
+  private toSubmission(s: typeof submissions.$inferSelect, grade: ReleasedGrade | null = null): AssignmentSubmission {
     const r = s.responses as { link?: string | null; selfAssessment?: Record<string, boolean> };
-    return { id: s.id, version: s.attemptNo, text: s.body ?? '', link: r.link ?? null, selfAssessment: r.selfAssessment ?? {}, submittedAt: s.submittedAt.toISOString() };
+    return { id: s.id, version: s.attemptNo, text: s.body ?? '', link: r.link ?? null, selfAssessment: r.selfAssessment ?? {}, submittedAt: s.submittedAt.toISOString(), grade };
   }
 }

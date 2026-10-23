@@ -9,6 +9,7 @@ import { and, asc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, flatItems } from '../enrollments/enrollments.service';
+import { programmeScore } from '../grading/course-score';
 import { addDays, todayIn, weekOf } from './calendar-time';
 import { CohortRow, learnerCounts, toCalendarWeek, toCohort, toSession } from './cohorts.service';
 
@@ -233,7 +234,9 @@ export class ProgramsService {
       .flatMap((r) => {
         const course = summaries.get(r.courseId);
         const e = enrolmentOf.get(r.courseId);
-        return course ? [{ course, phase: r.phaseName, required: r.required, enrollmentId: e?.id ?? null, progressPct: e?.progressPct ?? 0 }] : [];
+        return course
+          ? [{ course, phase: r.phaseName, required: r.required, enrollmentId: e?.id ?? null, progressPct: e?.progressPct ?? 0, creditHours: r.creditHours, score: e?.finalScore ?? null }]
+          : [];
       });
 
     const electives = this.electives(cohort, program, runs, summaries, mine.selections.map((s) => ({ group: s.groupKey, slug: s.courseSlug })), now);
@@ -245,6 +248,7 @@ export class ProgramsService {
       calendar,
       upcomingSessions: upcoming.map(toSession),
       courses,
+      score: programmeScore(courses.map((c) => ({ credits: c.creditHours, score: c.score }))),
       electives,
       attendance: { attended: attended[0]?.n ?? 0, held: held[0]?.n ?? 0 },
     };

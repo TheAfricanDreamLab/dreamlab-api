@@ -29,6 +29,13 @@
       "when": 1792580963780,
       "tag": "0003_cohorts_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792747561105,
+      "tag": "0004_grading_indexes",
+      "breakpoints": true
     }
   ]
 }
