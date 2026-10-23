@@ -9,6 +9,6 @@ import { CatalogSeedService, IAM_RPC } from './catalog-seed.service';
     CatalogSeedService,
     { provide: IAM_RPC, inject: [CONFIG], useFactory: (config: CatalogConfig) => new RpcClient(config.RABBITMQ_URL, IAM_USERS_QUEUE) },
   ],
-  exports: [CatalogSeedService],
+  exports: [CatalogSeedService, IAM_RPC],
 })
 export class SeedModule {}

@@ -116,7 +116,7 @@ describe('contract parity', () => {
     const routes = (router: AppRouter): AppRoute[] =>
       Object.values(router).flatMap((v) => (isAppRoute(v) ? [v] : routes(v as AppRouter)));
     // Catalog, learning, cohort and grading routes are served by their own services (test/learning-journey.e2e-spec.ts).
-    const { catalog: _catalog, learning: _learning, cohorts: _cohorts, grading: _grading, ...iamRoutes } = apiV1Contract;
+    const { catalog: _catalog, learning: _learning, cohorts: _cohorts, grading: _grading, authoring: _authoring, ...iamRoutes } = apiV1Contract;
     const missing = [...routes(iamRoutes as AppRouter), ...routes(wellKnownContract)]
       .map((r) => ({ method: r.method.toLowerCase(), path: r.path.replace(/:(\w+)/g, '{$1}') }))
       .filter((r) => !(doc.paths[r.path] as Record<string, unknown> | undefined)?.[r.method]);

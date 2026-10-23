@@ -12,6 +12,7 @@ import {
   BlockAuthoring,
   BlockResponse,
   CohortDetail,
+  Draft,
   CourseAuthoringSchema,
   CourseProgress,
   Enrollment,
@@ -167,6 +168,7 @@ describe('contract parity', () => {
     ['learning', () => learning, apiV1Contract.learning],
     ['learning (cohorts)', () => learning, apiV1Contract.cohorts],
     ['learning (grading)', () => learning, apiV1Contract.grading],
+    ['catalog (authoring)', () => catalog, apiV1Contract.authoring],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -615,5 +617,131 @@ describe('faculty grading (LRN-3)', () => {
       body: { code: 'not_latest_version' },
     });
     expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher))).body).toMatchObject({ items: [{ submissionId: v2Id, version: 2, status: 'awaiting' }] });
+  });
+});
+
+describe('course authoring in the browser (CAT-3)', () => {
+  let owner: string;
+  let author: string;
+  let outsider: string;
+  let admin: string;
+  let orgId: string;
+  const slug = 'benin-bronze-casting';
+
+  const lessonItem = (key: string, title: string) => ({
+    key,
+    type: 'lesson',
+    title,
+    minutes: 10,
+    payload: { steps: [{ id: 'step-one', blocks: [{ id: 'intro', type: 'text', body: 'The lost-wax method, step by step.' }] }] },
+  });
+  const fullCourse = (visibility: 'org_private' | 'public') => ({
+    slug,
+    title: 'Benin Bronze Casting',
+    subtitle: 'The lost-wax method',
+    description: 'How the guild casts bronze.',
+    provider: 'Benin Press',
+    level: 'beginner',
+    language: 'en',
+    visibility,
+    creditHours: 1,
+    outcomes: ['Explain the lost-wax method'],
+    skills: ['Casting'],
+    audience: 'Apprentices',
+    prerequisites: 'None',
+    practicalOutput: null,
+    cover: { from: '#7A4A12', to: '#C08A3E', symbol: 'B' },
+    instructors: [],
+    modules: [{ key: 'wax', title: 'Wax models', summary: 'Shaping the model', weekNo: null, items: [lessonItem('carving', 'Carving the wax')] }],
+  });
+  const url = (draftId: string, tail = '') => `/v1/catalog/authoring/drafts/${draftId}${tail}`;
+
+  beforeAll(async () => {
+    admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string }).accessToken;
+    const personal = await signUp('owner@benin-press.test', 'Osa Owner');
+    const org = await request(iam, 'POST', '/v1/orgs', { token: admin, body: { slug: 'benin-press', name: 'Benin Press', kinds: ['enterprise'], firstAdmin: { email: 'owner@benin-press.test' } } });
+    orgId = (org.body as { id: string }).id;
+    owner = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email: 'writer@benin-press.test', roleKeys: ['author'] } })).status).toBe(201);
+    const writer = await signUp('writer@benin-press.test', 'Ada Author');
+    expect((await request(iam, 'POST', '/v1/invitations/accept', { token: writer, body: { token: notifier.lastInviteToken('writer@benin-press.test') } })).status).toBe(200);
+    author = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: writer, body: { orgId } })).body as { accessToken: string }).accessToken;
+    outsider = await signUp('reader@far-away-press.test', 'Oti Outsider');
+  });
+
+  it('an author writes a new course; it cannot go for review until it is complete; stale saves are refused', async () => {
+    expect((await request(catalog, 'GET', '/v1/catalog/authoring', L(outsider))).status).toBe(403);
+    const overview = await request(catalog, 'GET', '/v1/catalog/authoring', L(author));
+    expect(overview.body).toMatchObject({ courses: [], newDrafts: [], can: { author: true, review: false } });
+
+    const created = await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { slug, title: 'Benin Bronze Casting' } });
+    expect(created.status).toBe(201);
+    const draft = created.body as Draft;
+    expect(draft).toMatchObject({ status: 'draft', visibility: 'org_private', revision: 1, can: { edit: true, submit: true, review: false } });
+    expect(draft.issues.length).toBeGreaterThan(0);
+    expect((await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { slug, title: 'Again' } })).body).toMatchObject({ code: 'draft_exists' });
+    expect((await request(catalog, 'POST', url(draft.id, '/submit'), { ...L(author), body: {} })).body).toMatchObject({ code: 'draft_has_issues' });
+
+    const saved = await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 1, doc: { ...fullCourse('org_private'), slug: 'sneaky-slug' } } });
+    expect(saved.body).toMatchObject({ revision: 2, issues: [], doc: { slug } });
+    expect((await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 1, doc: fullCourse('org_private') } })).body).toMatchObject({ code: 'draft_changed' });
+    expect((await request(catalog, 'GET', url(draft.id), L(outsider))).status).toBe(404);
+  });
+
+  it('a reviewer asks for changes, then publishes; members see the private course, others do not', async () => {
+    const [draft] = ((await request(catalog, 'GET', '/v1/catalog/authoring', L(author))).body as { newDrafts: Draft[] }).newDrafts;
+    expect((await request(catalog, 'POST', url(draft!.id, '/submit'), { ...L(author), body: {} })).body).toMatchObject({ status: 'in_review' });
+    expect((await request(catalog, 'PUT', url(draft!.id), { ...L(author), body: { revision: 2, doc: fullCourse('org_private') } })).body).toMatchObject({ code: 'draft_in_review' });
+    expect((await request(catalog, 'POST', url(draft!.id, '/publish'), { ...L(author), body: {} })).status).toBe(403);
+
+    const queue = (await request(catalog, 'GET', '/v1/catalog/authoring', L(owner))).body as { toReview: Draft[]; can: { review: boolean } };
+    expect(queue).toMatchObject({ can: { review: true }, toReview: [{ id: draft!.id, status: 'in_review' }] });
+    const returned = await request(catalog, 'POST', url(draft!.id, '/request-changes'), { ...L(owner), body: { note: 'Add a safety step.' } });
+    expect(returned.body).toMatchObject({ status: 'changes_requested', reviewNote: 'Add a safety step.', reviewedBy: { name: 'Osa Owner' } });
+
+    const fixed = fullCourse('org_private');
+    fixed.modules[0]!.items.push(lessonItem('safety', 'Working safely with molten bronze'));
+    await request(catalog, 'PUT', url(draft!.id), { ...L(author), body: { revision: 2, doc: fixed } });
+    await request(catalog, 'POST', url(draft!.id, '/submit'), { ...L(author), body: {} });
+    const published = await request(catalog, 'POST', url(draft!.id, '/publish'), { ...L(owner), body: { note: 'Ready.' } });
+    expect(published.body).toMatchObject({ status: 'published', publishedVersionNo: 1, courseId: expect.any(String) });
+
+    expect((await request(catalog, 'GET', `/v1/catalog/courses/${slug}`, L(author))).body).toMatchObject({ slug, versionNo: 1, moduleCount: 1 });
+    expect((await request(catalog, 'GET', `/v1/catalog/courses/${slug}`)).status).toBe(404);
+    expect((await request(catalog, 'GET', `/v1/catalog/courses/${slug}`, L(outsider))).status).toBe(404);
+  });
+
+  it('a second draft starts from the published version and publishes version 2; public courses need the platform team', async () => {
+    const created = (await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { courseSlug: slug } })).body as Draft;
+    expect(created).toMatchObject({ baseVersionNo: 1, issues: [], doc: { slug, modules: [{ key: 'wax', items: [{ key: 'carving' }, { key: 'safety' }] }] } });
+    const base = created.doc as ReturnType<typeof fullCourse>;
+    // A content change (a new item) makes a new version; details alone are updated in place.
+    const doc = {
+      ...base,
+      subtitle: 'The lost-wax method, revised',
+      visibility: 'public' as const,
+      modules: [{ ...base.modules[0]!, items: [...base.modules[0]!.items, lessonItem('finishing', 'Chasing and finishing')] }],
+    };
+    await request(catalog, 'PUT', url(created.id), { ...L(author), body: { revision: created.revision, doc } });
+    await request(catalog, 'POST', url(created.id, '/submit'), { ...L(author), body: {} });
+
+    // A public course joins the platform catalogue: the organisation's own reviewer can't publish it.
+    expect(await request(catalog, 'POST', url(created.id, '/publish'), { ...L(owner), body: {} })).toMatchObject({ status: 403 });
+    const platformQueue = (await request(catalog, 'GET', '/v1/catalog/authoring', L(admin))).body as { toReview: Draft[] };
+    expect(platformQueue.toReview.map((d) => d.id)).toContain(created.id);
+    const published = await request(catalog, 'POST', url(created.id, '/publish'), { ...L(admin), body: { note: null } });
+    expect(published.body).toMatchObject({ status: 'published', publishedVersionNo: 2 });
+    expect((await request(catalog, 'GET', `/v1/catalog/courses/${slug}`)).body).toMatchObject({ subtitle: 'The lost-wax method, revised', versionNo: 2 });
+    // Now public, it is listed in the catalogue.
+    const listed = (await request(catalog, 'GET', '/v1/catalog/courses?q=bronze')).body as { items: { slug: string }[] };
+    expect(listed.items.map((c) => c.slug)).toContain(slug);
+  });
+
+  it('exports a full published course as a draft that could be published unchanged', async () => {
+    const draft = (await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(admin), body: { courseSlug: 'problem-solving' } })).body as Draft;
+    expect(draft).toMatchObject({ slug: 'problem-solving', issues: [] });
+    expect((draft.doc as { modules: unknown[] }).modules.length).toBe(5);
+    expect((await request(catalog, 'DELETE', url(draft.id), L(admin))).status).toBe(204);
+    expect((await request(catalog, 'GET', url(draft.id), L(admin))).status).toBe(404);
   });
 });
