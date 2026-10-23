@@ -13,6 +13,7 @@ import type { IamConfig } from '../../../config';
 import { IamDatabase, IamTx, schema } from '../../../database';
 import { IamEvents } from '../../../events';
 import { recordConsent } from '../../auth/auth.service';
+import { MfaService } from '../../auth/services/mfa.service';
 import { SessionIssuer } from '../../auth/services/session-issuer.service';
 import { SsoPolicy } from '../../auth/services/sso-policy.service';
 import { emailDomain } from '../../auth/utils/email-domain';
@@ -72,6 +73,7 @@ export class SsoSignInService {
     private readonly issuer: SessionIssuer,
     private readonly users: UsersRepository,
     private readonly authz: AuthzService,
+    private readonly mfa: MfaService,
   ) {
     this.limiter = new RedisRateLimiter(redis, 'iam:rl:');
   }
@@ -235,8 +237,16 @@ export class SsoSignInService {
       await this.ensureMembership(tx, user.id, connection, meta);
       return user;
     });
-    // The organisation's own sign-on counts as its second factor.
-    const tokens = await this.db.system((tx) => this.issuer.start(tx, user, 'sso', meta, { mfa: true, orgId: connection.orgId }));
+    // Someone with their own authenticator still confirms a code: sign-on vouches for the address,
+    // not for the person, and any organisation that verified the domain can run a sign-on.
+    if (MfaService.enabled(user)) {
+      const challenge = await this.mfa.challenge(user, 'sso', { ...meta, tenantOrgId: connection.orgId });
+      return { kind: 'mfa' as const, challenge, returnTo: pending.returnTo };
+    }
+    // Otherwise the organisation's sign-on counts as its second factor, except for platform admins,
+    // whose platform permissions need their own authenticator (they are asked to add one).
+    const mfa = !(await this.authz.isPlatformAdmin(user.id));
+    const tokens = await this.db.system((tx) => this.issuer.start(tx, user, 'sso', meta, { mfa, orgId: connection.orgId }));
     return { kind: 'session' as const, tokens, returnTo: pending.returnTo };
   }
 

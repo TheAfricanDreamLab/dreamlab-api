@@ -55,8 +55,9 @@ type Tokens = { accessToken: string; refreshToken: string; context: { orgId: str
 const claims = (token: string) => JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString()) as Record<string, unknown>;
 
 async function signUp(email: string): Promise<Tokens> {
-  await request(app, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName: 'Test Person', consent } });
-  const res = await request(app, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.last(email)!.code } });
+  const reg = await request(app, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName: 'Test Person', consent } });
+  const registrationToken = (reg.body as { registrationToken: string }).registrationToken;
+  const res = await request(app, 'POST', '/v1/auth/verify', { body: { identifier: email, code: notifier.last(email)!.code, registrationToken } });
   expect(res.status).toBe(200);
   return res.body as Tokens;
 }
@@ -546,3 +547,70 @@ describe('phone codes (IAM-20)', () => {
 });
 
 void E2E_GATEWAY_TOKEN;
+
+describe('security regressions (23 Oct 2026 review)', () => {
+  /** A membership written straight to the database, as an invitation or join would leave it. */
+  const addMember = (orgId: string, email: string, source: 'invite' | 'scim', roleKey?: string) =>
+    db.system(async (tx) => {
+      const [u] = await tx.select().from(schema.users).where(eq(schema.users.email, email));
+      const id = crypto.randomUUID();
+      await tx.insert(schema.memberships).values({ id, userId: u!.id, orgId, status: 'active', source, joinedAt: new Date() });
+      if (roleKey) {
+        const [r] = await tx.select().from(schema.roles).where(eq(schema.roles.key, roleKey));
+        await tx.insert(schema.roleAssignments).values({ id: crypto.randomUUID(), orgId, membershipId: id, roleId: r!.id, scopeType: 'org' });
+      }
+      return id;
+    });
+
+  it('SCIM cannot reach people it did not provision, nor rename accounts used elsewhere', async () => {
+    const { orgId, tokens } = await enterprise('it@evil-corp.test', 'Evil Corp');
+    await verifiedDomain(orgId, tokens.accessToken, 'evil-corp.test');
+    const { token } = (await request(app, 'POST', `/v1/orgs/${orgId}/scim/token`, { token: tokens.accessToken })).body as { token: string };
+    const scim = (method: 'GET' | 'POST' | 'PATCH', url: string, body?: unknown) => request(app, method, `/scim/v2${url}`, { token, body });
+
+    // An invited member is not SCIM's to change: their address must not become one the org controls.
+    await signUp('victim@personal-mail.test');
+    const invited = await addMember(orgId, 'victim@personal-mail.test', 'invite');
+    const hijack = await scim('PATCH', `/Users/${invited}`, { Operations: [{ op: 'replace', path: 'userName', value: 'victim@evil-corp.test' }] });
+    expect(hijack.status).toBe(404);
+    const [victim] = await db.sys.select().from(schema.users).where(eq(schema.users.id, (await db.sys.select().from(schema.memberships).where(eq(schema.memberships.id, invited)))[0]!.userId));
+    expect(victim!.email).toBe('victim@personal-mail.test');
+
+    // A provisioned person who also belongs to another organisation keeps their email.
+    const created = await scim('POST', '/Users', { userName: 'shared@evil-corp.test', name: { givenName: 'Shared', familyName: 'Person' } });
+    const other = await enterprise('founder@elsewhere.test', 'Elsewhere');
+    await addMember(other.orgId, 'shared@evil-corp.test', 'invite');
+    const renamed = await scim('PATCH', `/Users/${(created.body as { id: string }).id}`, { Operations: [{ op: 'replace', path: 'userName', value: 'renamed@evil-corp.test' }] });
+    expect(renamed.status).toBe(400);
+  });
+
+  it('a password set before the owner proved the address does not survive verification', async () => {
+    const consentBody = { password: 'attacker chose this one', fullName: 'Not Me', consent };
+    // Someone registers another person's address and never verifies it.
+    await request(app, 'POST', '/v1/auth/register', { body: { email: 'owner@inbox.test', ...consentBody } });
+    // The owner signs in with a code instead: the stranger's password is gone.
+    await request(app, 'POST', '/v1/auth/otp', { body: { identifier: 'owner@inbox.test', purpose: 'login' } });
+    expect((await request(app, 'POST', '/v1/auth/login/otp', { body: { identifier: 'owner@inbox.test', code: notifier.last('owner@inbox.test')!.code } })).status).toBe(200);
+    expect((await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'owner@inbox.test', password: 'attacker chose this one' } })).status).toBe(401);
+
+    // A code that reached the inbox from someone else's registration verifies the address but sets no password.
+    await request(app, 'POST', '/v1/auth/register', { body: { email: 'second@inbox.test', ...consentBody } });
+    expect((await request(app, 'POST', '/v1/auth/verify', { body: { identifier: 'second@inbox.test', code: notifier.last('second@inbox.test')!.code } })).status).toBe(200);
+    expect((await request(app, 'POST', '/v1/auth/login', { body: { identifier: 'second@inbox.test', password: 'attacker chose this one' } })).status).toBe(401);
+  });
+
+  it('nobody grants more than they hold', async () => {
+    const { orgId, tokens } = await enterprise('founder@escalate.test', 'Escalate Ltd');
+    await request(app, 'POST', `/v1/orgs/${orgId}/roles`, { token: tokens.accessToken, body: { name: 'Coordinator', permissions: ['org.read', 'org.members.read', 'org.roles.assign', 'org.roles.manage'] } });
+    const coordinator = await signUp('coord@escalate.test');
+    const membershipId = await addMember(orgId, 'coord@escalate.test', 'invite', 'coordinator');
+    const inOrg = (await request(app, 'POST', '/v1/auth/switch-org', { token: coordinator.accessToken, body: { orgId } })).body as Tokens;
+
+    const toAdmin = await request(app, 'POST', `/v1/orgs/${orgId}/members/${membershipId}/roles`, { token: inOrg.accessToken, body: { roleKey: 'org_admin' } });
+    expect(toAdmin).toMatchObject({ status: 403, body: { code: 'grant_exceeds_own' } });
+    const widen = await request(app, 'PATCH', `/v1/orgs/${orgId}/roles/coordinator`, { token: inOrg.accessToken, body: { permissions: ['org.read', 'org.security.manage'] } });
+    expect(widen).toMatchObject({ status: 403, body: { code: 'grant_exceeds_own' } });
+    // Within what they hold, they may grant.
+    expect((await request(app, 'POST', `/v1/orgs/${orgId}/members/${membershipId}/roles`, { token: inOrg.accessToken, body: { roleKey: 'learner' } })).status).toBe(201);
+  });
+});

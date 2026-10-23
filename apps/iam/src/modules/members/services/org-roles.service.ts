@@ -60,6 +60,7 @@ export class OrgRolesService {
     if (!/^[a-z][a-z0-9_]{1,63}$/.test(key)) throw badRequest('role_key_invalid', 'Give the role a name that starts with a letter', { fields: ['key'] });
     if (isSystemRoleKey(key)) throw conflict('role_key_reserved', 'That name belongs to a built-in role. Choose another.');
     const permissions = this.checkPermissions(dto.permissions);
+    await this.authz.assertMayGrant(principal.userId, orgId, permissions);
     return this.db.tenant(this.ctx(principal, orgId), async (tx) => {
       const [n] = await tx.select({ n: count() }).from(roles).where(eq(roles.orgId, orgId));
       if (Number(n?.n ?? 0) >= MAX_CUSTOM_ROLES) throw conflict('role_limit', `An organisation can have up to ${MAX_CUSTOM_ROLES} custom roles.`);
@@ -82,7 +83,10 @@ export class OrgRolesService {
     meta: RequestMeta,
   ) {
     const patch: Partial<RoleRow> = { ...dto };
-    if (dto.permissions) patch.permissions = this.checkPermissions(dto.permissions);
+    if (dto.permissions) {
+      patch.permissions = this.checkPermissions(dto.permissions);
+      await this.authz.assertMayGrant(principal.userId, orgId, patch.permissions);
+    }
     if (dto.scopeTypes) patch.scopeTypes = [...new Set(dto.scopeTypes)];
     return this.db.tenant(this.ctx(principal, orgId), async (tx) => {
       const [row] = await tx.update(roles).set(patch).where(and(eq(roles.orgId, orgId), eq(roles.key, key))).returning();

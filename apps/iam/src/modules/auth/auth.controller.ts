@@ -46,7 +46,7 @@ export class AuthController {
   @ApiOperation({ summary: r.verify.summary })
   @ZodResponse({ status: 200, type: SignInResponseDto })
   verify(@Body() dto: VerifyDto, @Meta() meta: RequestMeta) {
-    return this.auth.verify(dto.identifier, dto.code, meta);
+    return this.auth.verify(dto.identifier, dto.code, meta, dto.registrationToken);
   }
 
   @Post('login')

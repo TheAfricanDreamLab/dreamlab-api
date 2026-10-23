@@ -105,7 +105,7 @@ export class PermissionsGuard implements CanActivate {
     const routeOrgId = params[requirement.orgParam ?? 'orgId'];
     const ask = (orgId: string, scope: ScopeQuery = {}): Promise<boolean> =>
       this.checker
-        ? this.checker.check({ userId: principal.userId, orgId, permission: requirement.permission, authzVersion: principal.authzVersion, ...scope })
+        ? this.checker.check({ userId: principal.userId, orgId, permission: requirement.permission, authzVersion: principal.authzVersion, fresh: principal.stale, ...scope })
         : Promise.resolve(false);
 
     // A stale platform-admin claim is re-checked; platform admins act in any organisation.

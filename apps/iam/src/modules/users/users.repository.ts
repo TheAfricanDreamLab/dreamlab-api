@@ -64,6 +64,11 @@ export class UsersRepository {
       });
   }
 
+  /** Remove the password sign-in (used for passwords nobody has proven they set: see AuthService.register). */
+  async dropPassword(tx: IamTx, userId: string): Promise<void> {
+    await tx.delete(userIdentities).where(and(eq(userIdentities.userId, userId), eq(userIdentities.provider, 'password')));
+  }
+
   async markVerified(tx: IamTx, userId: string, identifier: string): Promise<void> {
     await tx
       .update(users)

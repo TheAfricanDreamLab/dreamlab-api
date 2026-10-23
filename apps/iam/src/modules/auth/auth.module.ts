@@ -17,6 +17,6 @@ import { TokenService } from './services/token.service';
   imports: [UsersModule, OtpModule],
   controllers: [AuthController, MfaController, WellKnownController],
   providers: [AuthService, GoogleIdentityService, MfaService, PasswordService, SessionIssuer, SessionsService, SsoPolicy, TokenService],
-  exports: [PasswordService, SessionIssuer, SessionsService, SsoPolicy],
+  exports: [MfaService, PasswordService, SessionIssuer, SessionsService, SsoPolicy],
 })
 export class AuthenticationModule {}

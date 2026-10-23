@@ -195,6 +195,7 @@ export class GradingService {
       orgId,
       permission: 'submission.grade',
       authzVersion: p.authzVersion,
+      fresh: p.stale,
       ...(scopeType !== 'org' && { scopeType, scopeId }),
     });
   }

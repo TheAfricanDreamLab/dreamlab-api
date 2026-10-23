@@ -59,11 +59,12 @@ export class InvitationsService {
         throw conflict('org_pending', 'Your organisation is awaiting approval. Until then you can only invite co-admins.');
       }
       const found = await tx
-        .select({ key: roles.key, scopeTypes: roles.scopeTypes })
+        .select({ key: roles.key, scopeTypes: roles.scopeTypes, permissions: roles.permissions })
         .from(roles)
         .where(and(inArray(roles.key, roleKeys), or(isNull(roles.orgId), eq(roles.orgId, orgId))));
       const unknown = roleKeys.filter((k) => !found.some((f) => f.key === k && f.scopeTypes.includes('org')));
       if (unknown.length) throw badRequest('role_not_found', `Roles not assignable org-wide: ${unknown.join(', ')}`);
+      if (roleKeys.some((k) => k !== 'learner')) await this.authz.assertMayGrant(principal.userId, orgId, found.flatMap((f) => f.permissions));
       if (dto.orgUnitId) {
         const [unit] = await tx.select({ id: orgUnits.id }).from(orgUnits).where(eq(orgUnits.id, dto.orgUnitId));
         if (!unit) throw badRequest('unit_not_found', 'Org unit not found');
