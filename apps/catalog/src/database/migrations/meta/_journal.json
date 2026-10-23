@@ -22,6 +22,13 @@
       "when": 1792477002907,
       "tag": "0002_course_trailer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792758590135,
+      "tag": "0003_course_drafts",
+      "breakpoints": true
     }
   ]
 }

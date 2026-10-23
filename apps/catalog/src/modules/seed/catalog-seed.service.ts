@@ -71,9 +71,12 @@ export class CatalogSeedService {
     this.logger.log(`Seeded "${dataset.name}": ${dataset.courses.length} courses (${published} new versions), ${dataset.programs.length} programmes`);
   }
 
-  /** Create or update a course; publishes a new version when the authored content changed. */
-  importCourse(c: CourseAuthoring, ownerOrgId: string, featured = false): Promise<{ slug: string; published: boolean; versionNo: number | null }> {
-    return this.db.system(async (tx) => {
+  /**
+   * Create or update a course; publishes a new version when the authored content changed. Pass `outer`
+   * to make it part of a larger transaction (publishing a draft).
+   */
+  importCourse(c: CourseAuthoring, ownerOrgId: string, featured = false, outer?: CatalogTx): Promise<{ slug: string; published: boolean; versionNo: number | null }> {
+    const run = async (tx: CatalogTx) => {
       const details = {
         title: c.title,
         subtitle: c.subtitle,
@@ -119,7 +122,8 @@ export class CatalogSeedService {
         payload: { courseId: row!.id, slug: c.slug, versionId },
       });
       return { slug: c.slug, published: true, versionNo };
-    });
+    };
+    return outer ? run(outer) : this.db.system(run);
   }
 
   private async publishVersion(
