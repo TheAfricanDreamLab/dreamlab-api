@@ -97,7 +97,7 @@ export class AuthoringService {
       const slug = input.slug!;
       const title = input.title!;
       const [taken] = await this.db.sys.select({ id: courses.id }).from(courses).where(eq(courses.slug, slug));
-      if (taken) throw conflict('slug_taken', 'A course already uses that web address. Choose another.');
+      if (taken) throw conflict('course_slug_taken', 'A course already uses that web address. Choose another.');
       const [ownerName] = (await this.orgNames([orgId])).values();
       const visibility = p.platformAdmin ? ('public' as const) : ('org_private' as const);
       values = { courseId: null, slug, title, visibility, doc: this.blank(slug, title, ownerName ?? '', visibility), baseVersionNo: null, ownerOrgId: orgId };
