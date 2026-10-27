@@ -29,6 +29,13 @@
       "when": 1792758590135,
       "tag": "0003_course_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793130631223,
+      "tag": "0004_system_role_policies",
+      "breakpoints": true
     }
   ]
 }
