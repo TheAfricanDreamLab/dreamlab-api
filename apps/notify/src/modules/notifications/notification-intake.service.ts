@@ -26,8 +26,14 @@ export const NotificationRequestSchema = z.object({
   category: NotificationCategorySchema,
   title: z.string().min(1).max(200),
   body: z.string().max(2000),
-  // App paths only, so an emailed link can never point at another site.
-  link: z.string().regex(/^\/(?![/\\])/).max(500).nullable(),
+  // App paths only, so an emailed link can never point at another site. No whitespace or control
+  // characters either: URL parsing drops tabs and newlines, so "/\t/evil.example" would become //evil.example.
+  link: z
+    .string()
+    .max(500)
+    .regex(/^\/(?![/\\])[^\s\\]*$/)
+    .refine((l) => ![...l].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127), 'No control characters')
+    .nullable(),
   orgId: z.string().uuid().nullable(),
   key: z.string().min(1).max(200),
 });

@@ -50,21 +50,27 @@ export class CatalogAdminService {
 
   /** The programme as its authored file: what importProgram takes, so an edit round-trips unchanged. */
   async exportProgram(slug: string): Promise<ProgramAuthoring> {
-    const [program] = await this.db.sys.select().from(programs).where(eq(programs.slug, slug));
-    if (!program) throw notFound('program_not_found', 'Programme not found');
-    const [phases, links, groups, stages, requirements, weeks] = await Promise.all([
-      this.db.sys.select().from(programPhases).where(eq(programPhases.programId, program.id)).orderBy(asc(programPhases.position)),
-      this.db.sys
-        .select({ phaseId: programCourses.phaseId, slug: courses.slug, creditHours: programCourses.creditHours, required: programCourses.isRequired })
-        .from(programCourses)
-        .innerJoin(courses, eq(courses.id, programCourses.courseId))
-        .where(eq(programCourses.programId, program.id))
-        .orderBy(asc(programCourses.position)),
-      this.db.sys.select().from(electiveGroups).where(eq(electiveGroups.programId, program.id)),
-      this.db.sys.select().from(capstoneStageDefs).where(eq(capstoneStageDefs.programId, program.id)).orderBy(asc(capstoneStageDefs.position)),
-      this.db.sys.select().from(graduationRequirements).where(eq(graduationRequirements.programId, program.id)).orderBy(asc(graduationRequirements.position)),
-      this.db.sys.select().from(programCalendarWeeks).where(eq(programCalendarWeeks.programId, program.id)).orderBy(asc(programCalendarWeeks.weekNo)),
-    ]);
+    // One snapshot: an import committing halfway through would otherwise mix old phases with new
+    // course links, and importing that file again would drop the programme's courses.
+    const { program, phases, links, groups, stages, requirements, weeks } = await this.db.sys.transaction(
+      async (tx) => {
+        const [program] = await tx.select().from(programs).where(eq(programs.slug, slug));
+        if (!program) throw notFound('program_not_found', 'Programme not found');
+        const phases = await tx.select().from(programPhases).where(eq(programPhases.programId, program.id)).orderBy(asc(programPhases.position));
+        const links = await tx
+          .select({ phaseId: programCourses.phaseId, slug: courses.slug, creditHours: programCourses.creditHours, required: programCourses.isRequired })
+          .from(programCourses)
+          .innerJoin(courses, eq(courses.id, programCourses.courseId))
+          .where(eq(programCourses.programId, program.id))
+          .orderBy(asc(programCourses.position));
+        const groups = await tx.select().from(electiveGroups).where(eq(electiveGroups.programId, program.id));
+        const stages = await tx.select().from(capstoneStageDefs).where(eq(capstoneStageDefs.programId, program.id)).orderBy(asc(capstoneStageDefs.position));
+        const requirements = await tx.select().from(graduationRequirements).where(eq(graduationRequirements.programId, program.id)).orderBy(asc(graduationRequirements.position));
+        const weeks = await tx.select().from(programCalendarWeeks).where(eq(programCalendarWeeks.programId, program.id)).orderBy(asc(programCalendarWeeks.weekNo));
+        return { program, phases, links, groups, stages, requirements, weeks };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
     const phaseName = new Map(phases.map((ph) => [ph.id, ph.name]));
     const chooseN = new Map(groups.map((g) => [g.phaseId, g.chooseN]));
     return {

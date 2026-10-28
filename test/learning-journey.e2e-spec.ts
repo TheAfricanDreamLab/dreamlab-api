@@ -50,7 +50,7 @@ import { learningConfigSchema } from '../apps/learning/src/config';
 import { learningMigrationsFolder } from '../apps/learning/src/database';
 import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
 import { SessionRemindersService } from '../apps/learning/src/modules/cohorts/session-reminders.service';
-import { STORAGE } from '../apps/learning/src/modules/files/files.service';
+import { FilesService, STORAGE } from '../apps/learning/src/modules/files/files.service';
 import { NotifyAppModule } from '../apps/notify/src/app.module';
 import { notifyConfigSchema } from '../apps/notify/src/config';
 import { notifyMigrationsFolder } from '../apps/notify/src/database';
@@ -734,6 +734,17 @@ describe('faculty grading (LRN-3)', () => {
     expect(download.headers.get('content-disposition')).toContain('attachment');
     expect((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(student))).status).toBe(200);
     expect((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(owner))).status).toBe(404);
+
+    // Upload links are create-only: the submitted file cannot be replaced afterwards.
+    expect((await fetch(uploadUrl, { method: 'PUT', headers, body: Buffer.from('swapped') })).ok).toBe(false);
+    expect(await (await fetch(((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(teacher))).body as { url: string }).url)).text()).toBe('%PDF-1.7 ok');
+
+    // A file uploaded but never submitted is swept away; submitted files stay.
+    const stray = (await request(learning, 'POST', files, { ...L(student), body: { fileName: 'draft.pdf', contentType: 'application/pdf', size: 5 } })).body as SubmissionFileUpload;
+    expect((await fetch(stray.uploadUrl, { method: 'PUT', headers: stray.headers, body: Buffer.from('draft') })).status).toBe(201);
+    expect(await learning.get(FilesService).sweep(new Date(Date.now() + 3 * 3_600_000))).toBeGreaterThanOrEqual(1);
+    expect((await request(learning, 'GET', `/v1/learning/files/${stray.fileId}`, L(student))).status).toBe(404);
+    expect((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(student))).status).toBe(200);
   });
 });
 

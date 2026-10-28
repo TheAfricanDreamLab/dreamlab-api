@@ -17,7 +17,7 @@ describe('notification requests', () => {
   it('accept app paths only as links', () => {
     expect(NotificationRequestSchema.safeParse(request).success).toBe(true);
     expect(NotificationRequestSchema.safeParse({ ...request, link: null }).success).toBe(true);
-    for (const link of ['https://evil.example/x', '//evil.example/x', '/\\evil.example', 'javascript:alert(1)']) {
+    for (const link of ['https://evil.example/x', '//evil.example/x', '/\\evil.example', 'javascript:alert(1)', '/\t/evil.example', '/\n/evil.example', '/a b']) {
       expect(NotificationRequestSchema.safeParse({ ...request, link }).success).toBe(false);
     }
   });

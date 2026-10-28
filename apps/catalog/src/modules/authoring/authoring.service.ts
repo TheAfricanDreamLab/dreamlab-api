@@ -177,7 +177,7 @@ export class AuthoringService {
       body: `A new version of “${row.title}” was sent for review. Read it through, then publish it or ask for changes.`,
       link: `/app/authoring/${row.id}`,
       orgId: row.ownerOrgId,
-      key: `draft-review:${row.id}:${row.revision}`,
+      key: `draft-review:${row.id}:${row.submittedAt?.toISOString() ?? row.revision}`,
     }));
   }
 

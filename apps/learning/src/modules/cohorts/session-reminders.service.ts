@@ -40,10 +40,19 @@ export class SessionRemindersService implements OnApplicationBootstrap, OnApplic
     for (const { id } of due) {
       await this.db.system(async (tx) => {
         // Claimed by the update, so two instances never remind the same session twice.
+        // The same conditions as the select: a session cancelled or moved since then is skipped.
         const [session] = await tx
           .update(classSessions)
           .set({ reminderSentAt: now })
-          .where(and(eq(classSessions.id, id), isNull(classSessions.reminderSentAt)))
+          .where(
+            and(
+              eq(classSessions.id, id),
+              isNull(classSessions.reminderSentAt),
+              eq(classSessions.cancelled, false),
+              gt(classSessions.startsAt, now),
+              lte(classSessions.startsAt, new Date(now.getTime() + AHEAD_MS)),
+            ),
+          )
           .returning();
         if (!session) return;
         const [cohort] = await tx.select({ name: cohorts.name }).from(cohorts).where(eq(cohorts.id, session.cohortId));

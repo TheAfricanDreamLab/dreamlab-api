@@ -77,13 +77,16 @@ export class BlobStorage {
     });
   }
 
-  /** A write-only link for one blob, valid for half an hour. */
+  /**
+   * A create-only link for one blob, valid for half an hour: it cannot overwrite the blob once it
+   * exists, so a submitted file stays what was checked.
+   */
   uploadTicket(visibility: Visibility, path: string, contentType: string): UploadTicket {
     const { service, credential } = this.require();
     const container = this.container(visibility);
     const expiresOn = new Date(Date.now() + UPLOAD_MINUTES * 60_000);
     const sas = generateBlobSASQueryParameters(
-      { containerName: container, blobName: path, permissions: BlobSASPermissions.parse('cw'), startsOn: new Date(Date.now() - 60_000), expiresOn, contentType },
+      { containerName: container, blobName: path, permissions: BlobSASPermissions.parse('c'), startsOn: new Date(Date.now() - 60_000), expiresOn, contentType },
       credential,
     );
     const url = service.getContainerClient(container).getBlockBlobClient(path).url;

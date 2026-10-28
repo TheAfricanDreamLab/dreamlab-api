@@ -1,10 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { MAX_SUBMISSION_FILE_BYTES, SubmissionFile, SubmissionFileUpload } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { badRequest, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { BlobStorage, safeFileName } from '@lib/storage';
-import { and, arrayContains, count, eq, gt, inArray } from 'drizzle-orm';
+import { and, arrayContains, count, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { LearningDatabase, schema } from '../../database';
 
 export const STORAGE = Symbol('STORAGE');
@@ -12,14 +12,52 @@ export const STORAGE = Symbol('STORAGE');
 const { learnerFiles, submissions } = schema;
 /** Uploads a learner may start per assignment in a day; stops a script filling storage. */
 const DAILY_UPLOADS_PER_ITEM = 30;
+/** Uploads never attached to a submission are removed after this long (upload links last 30 minutes). */
+const ABANDONED_AFTER_MS = 2 * 3_600_000;
+const SWEEP_EVERY_MS = 3_600_000;
 
-/** Learners' assignment files: upload links, checks on submit, and short-lived download links. */
+/**
+ * Learners' assignment files: upload links, checks on submit, and short-lived download links. Upload
+ * links cannot cap a file's size, so files never submitted (oversized or abandoned) are swept away.
+ */
 @Injectable()
-export class FilesService {
+export class FilesService implements OnApplicationBootstrap, OnApplicationShutdown {
+  private readonly logger = new Logger(FilesService.name);
+  private timer: NodeJS.Timeout | null = null;
+
   constructor(
     @InjectDatabase() private readonly db: LearningDatabase,
     @Inject(STORAGE) private readonly storage: BlobStorage,
   ) {}
+
+  onApplicationBootstrap(): void {
+    if (!this.storage.enabled) return;
+    this.timer = setInterval(() => void this.sweep().catch((e: unknown) => this.logger.error(e instanceof Error ? e.message : String(e))), SWEEP_EVERY_MS);
+    this.timer.unref();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  /** Deletes files older than ABANDONED_AFTER_MS that no submission uses; returns how many. */
+  async sweep(now = new Date()): Promise<number> {
+    const stale = await this.db.sys
+      .select({ id: learnerFiles.id, path: learnerFiles.path })
+      .from(learnerFiles)
+      .where(
+        and(
+          lt(learnerFiles.createdAt, new Date(now.getTime() - ABANDONED_AFTER_MS)),
+          sql`not exists (select 1 from ${submissions} where ${learnerFiles.id} = any(${submissions.fileAssetIds}))`,
+        ),
+      )
+      .limit(200);
+    for (const f of stale) {
+      await this.storage.remove('private', f.path);
+      await this.db.system((tx) => tx.delete(learnerFiles).where(eq(learnerFiles.id, f.id)));
+    }
+    return stale.length;
+  }
 
   async uploadTicket(p: Principal, enrollmentId: string, itemId: string, req: { fileName: string; contentType: string; size: number }): Promise<SubmissionFileUpload> {
     const [{ n } = { n: 0 }] = await this.db.sys
