@@ -690,9 +690,11 @@ describe('faculty grading (LRN-3)', () => {
     expect(gradeBodies).toEqual(expect.arrayContaining([expect.stringContaining('100%'), expect.stringContaining('75%')]));
     expect(graded[0]!.link).toBe(`/learn/${enrollmentId}/${itemId}`);
     await eventually(() => mail.to('student@kano-studio.test').length >= 2);
-    expect(mail.to('student@kano-studio.test')).toEqual(
-      expect.arrayContaining([expect.objectContaining({ subject: expect.stringContaining('was graded'), html: expect.stringContaining(`https://learn.test/learn/${enrollmentId}/${itemId}`) })]),
-    );
+    // Both grade emails, whichever arrived first.
+    expect(mail.to('student@kano-studio.test')).toHaveLength(2);
+    for (const m of mail.to('student@kano-studio.test')) {
+      expect(m).toMatchObject({ subject: expect.stringContaining('was graded'), html: expect.stringContaining(`https://learn.test/learn/${enrollmentId}/${itemId}`) });
+    }
 
     const unread = (await request(notify, 'GET', '/v1/notifications/unread-count', L(student))).body as { unread: number };
     expect(unread.unread).toBeGreaterThanOrEqual(2);
