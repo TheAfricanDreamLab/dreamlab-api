@@ -14,6 +14,11 @@ const { learnerFiles, submissions } = schema;
 const DAILY_UPLOADS_PER_ITEM = 30;
 /** Uploads never attached to a submission are removed after this long (upload links last 30 minutes). */
 const ABANDONED_AFTER_MS = 2 * 3_600_000;
+/**
+ * An upload must be attached within this long; the sweep waits longer, so a file being submitted is
+ * never swept at the same moment. Files already attached to a submission may be attached again later.
+ */
+const ATTACH_WITHIN_MS = 90 * 60_000;
 const SWEEP_EVERY_MS = 3_600_000;
 
 /**
@@ -83,6 +88,10 @@ export class FilesService implements OnApplicationBootstrap, OnApplicationShutdo
     for (const id of ids) {
       const f = byId.get(id);
       if (!f || f.userId !== p.userId || f.courseEnrollmentId !== enrollmentId || f.contentItemId !== itemId) throw badRequest('file_not_found', 'One of the attached files was not found. Upload it again.');
+      if (f.createdAt.getTime() < Date.now() - ATTACH_WITHIN_MS) {
+        const [attached] = await this.db.sys.select({ id: submissions.id }).from(submissions).where(arrayContains(submissions.fileAssetIds, [f.id])).limit(1);
+        if (!attached) throw badRequest('file_expired', `“${f.name}” was uploaded too long ago. Upload it again.`);
+      }
       const stored = await this.storage.stat('private', f.path);
       if (!stored) throw badRequest('file_not_uploaded', `“${f.name}” has not finished uploading. Upload it again.`);
       if (stored.size > MAX_SUBMISSION_FILE_BYTES) {
