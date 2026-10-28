@@ -31,6 +31,16 @@ Question blocks, checked by the server so answers never reach a browser:
 
 Every change to a course's content publishes a **new version**. Learners stay on the version they enrolled in, so a revision never changes a course under someone halfway through it. Course details (title, description, cover) update in place.
 
+## Writing in the browser
+
+Authors open **Authoring**, edit a draft (details, outline, JSON), upload a cover photo, a trailer or
+lesson videos and images (stored in the platform's file storage and served from `/media/...`), and
+**Preview** the draft as learners will see it before sending it for review. Reviewers publish it or
+ask for changes; both sides are notified (in the app, and by email unless they turned it off).
+
+Who may write: the **Course author** role for the whole organisation (any course, and new ones), or
+for **one course** (People → add role → *for <course>*): that author sees and edits that course only.
+
 ## Staging and production
 
 - **Staging** loads test content on start (`CATALOG_SEED=dream-lab-test`): The African Dream Lab programme, the full Problem Solving course, and the other twelve courses as "coming soon" outlines. Re-deploying never duplicates it; changed content becomes a new version.
@@ -41,14 +51,20 @@ Every change to a course's content publishes a **new version**. Learners stay on
 1. Write the course as JSON in the `CourseAuthoring` shape (`@dreamlab/contracts`, `src/content.ts`). The test course is a full example: `apps/catalog/src/seed/content/problem-solving.ts`.
 2. Sign in as a platform admin, open **Platform admin → Catalog**, choose **Import**, pick the file.
 3. The catalog validates it, creates or updates the course, and publishes a new version when the content changed. The result shows the version number.
-4. Import programmes the same way (`ProgramAuthoring`); their courses must already exist.
+4. Import programmes the same way (`ProgramAuthoring`); their courses must already exist. Or edit a
+   programme in the browser: **Catalog → Programmes → Edit** (or **New programme**) loads it as its
+   file, and saving imports it again. New cohorts follow the saved programme; scheduled ones keep theirs.
 5. Use **Listed** to hide or show a course in the catalog (enrolled learners keep access) and **Featured** to show it first.
 
-API equivalents: `POST /v1/catalog/admin/courses/import`, `POST /v1/catalog/admin/programs/import`, `PATCH /v1/catalog/admin/courses/:courseId`.
+API equivalents: `POST /v1/catalog/admin/courses/import`, `GET` / `POST /v1/catalog/admin/programs/...`, `PATCH /v1/catalog/admin/courses/:courseId`.
 
 ## Privacy
 
 - A learner's enrolments, progress, answers and submissions are visible to that learner only (row-level security per learner). Submissions and grades are append-only.
 - Discussion posts are visible to learners of the same course in the same context: an organisation's learners see each other; people learning on their own see other people learning on their own. Only display names are shared.
+- Files attached to an assignment are private: only the learner and the people who may grade that work
+  can open them, each time through a link that works for a few minutes.
+- Notifications are per person (row-level security); emails carry the notification's text and a link
+  into the app, nothing else.
 - Poll and scale results are counts only.
 - Platform statistics are counts; no learner's records leave the learning service.
