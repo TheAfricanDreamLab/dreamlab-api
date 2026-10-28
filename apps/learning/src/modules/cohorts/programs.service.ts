@@ -3,7 +3,7 @@ import type { Cohort, MyProgram, ProgramDetail } from '@dreamlab/contracts';
 import { hasOrgPermission, type Principal } from '@lib/auth';
 import { badRequest, conflict, forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
-import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
+import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { CatalogClient } from '@lib/rpc';
 import { and, asc, eq, gt, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
@@ -86,6 +86,20 @@ export class ProgramsService {
       }
       const runs = await tx.select().from(courseRuns).where(and(eq(courseRuns.cohortId, cohort.id), eq(courseRuns.required, true)));
       for (const run of runs) await this.enrolInRun(tx, p, cohort, id, run, requestId);
+      await requestNotification(
+        this.outbox,
+        tx,
+        {
+          to: { userIds: [p.userId] },
+          category: 'cohorts',
+          title: `Welcome to ${cohort.name}`,
+          body: `You have joined ${cohort.name}. Your programme calendar, courses and class sessions are ready.`,
+          link: '/app/programme',
+          orgId: cohort.hostOrgId,
+          key: `cohort-joined:${id}:${Date.now()}`,
+        },
+        userActor(p.userId),
+      );
       return id;
     });
     return this.myProgram(p, enrollmentId);

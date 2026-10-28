@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ProgramAuthoring } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
@@ -7,7 +8,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { CatalogDatabase, schema } from '../../database';
 import { CatalogEvents } from '../../events';
 
-const { courses, courseVersions, catalogListings } = schema;
+const { courses, courseVersions, catalogListings, programs, programPhases, programCourses, electiveGroups, capstoneStageDefs, graduationRequirements, programCalendarWeeks } = schema;
 
 /** Platform administration of the catalog (PLT-1): what is listed and what is featured. */
 @Injectable()
@@ -45,6 +46,57 @@ export class CatalogAdminService {
     });
     const [item] = await this.toAdmin([courseId]);
     return item!;
+  }
+
+  /** The programme as its authored file: what importProgram takes, so an edit round-trips unchanged. */
+  async exportProgram(slug: string): Promise<ProgramAuthoring> {
+    // One snapshot: an import committing halfway through would otherwise mix old phases with new
+    // course links, and importing that file again would drop the programme's courses.
+    const { program, phases, links, groups, stages, requirements, weeks } = await this.db.sys.transaction(
+      async (tx) => {
+        const [program] = await tx.select().from(programs).where(eq(programs.slug, slug));
+        if (!program) throw notFound('program_not_found', 'Programme not found');
+        const phases = await tx.select().from(programPhases).where(eq(programPhases.programId, program.id)).orderBy(asc(programPhases.position));
+        const links = await tx
+          .select({ phaseId: programCourses.phaseId, slug: courses.slug, creditHours: programCourses.creditHours, required: programCourses.isRequired })
+          .from(programCourses)
+          .innerJoin(courses, eq(courses.id, programCourses.courseId))
+          .where(eq(programCourses.programId, program.id))
+          .orderBy(asc(programCourses.position));
+        const groups = await tx.select().from(electiveGroups).where(eq(electiveGroups.programId, program.id));
+        const stages = await tx.select().from(capstoneStageDefs).where(eq(capstoneStageDefs.programId, program.id)).orderBy(asc(capstoneStageDefs.position));
+        const requirements = await tx.select().from(graduationRequirements).where(eq(graduationRequirements.programId, program.id)).orderBy(asc(graduationRequirements.position));
+        const weeks = await tx.select().from(programCalendarWeeks).where(eq(programCalendarWeeks.programId, program.id)).orderBy(asc(programCalendarWeeks.weekNo));
+        return { program, phases, links, groups, stages, requirements, weeks };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+    const phaseName = new Map(phases.map((ph) => [ph.id, ph.name]));
+    const chooseN = new Map(groups.map((g) => [g.phaseId, g.chooseN]));
+    return {
+      slug: program.slug,
+      title: program.title,
+      subtitle: program.subtitle,
+      description: program.description,
+      provider: program.provider,
+      programType: program.programType,
+      deliveryMode: program.deliveryMode,
+      features: program.features,
+      cover: program.cover,
+      phases: phases.map((ph) => ({
+        key: ph.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `phase-${ph.position}`,
+        name: ph.name,
+        summary: ph.summary,
+        weekFrom: ph.weekFrom,
+        weekTo: ph.weekTo,
+        weightPct: ph.weightPct,
+        chooseN: chooseN.get(ph.id) ?? null,
+        courses: links.filter((l) => l.phaseId === ph.id).map((l) => ({ slug: l.slug, creditHours: l.creditHours, required: l.required })),
+      })),
+      capstoneStages: stages.map((st) => ({ name: st.name, outputDocument: st.outputDocument, creditHours: st.creditHours, summary: st.summary })),
+      graduationRequirements: requirements.map((r) => ({ key: r.key, label: r.label })),
+      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput })),
+    };
   }
 
   private async toAdmin(ids: string[]) {

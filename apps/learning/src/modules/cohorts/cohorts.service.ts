@@ -464,6 +464,7 @@ export class CohortsService {
             }),
             ...(input.startsAt !== undefined && {
               startsAt: new Date(input.startsAt),
+              reminderSentAt: null,
             }),
             updatedAt: new Date(),
           })

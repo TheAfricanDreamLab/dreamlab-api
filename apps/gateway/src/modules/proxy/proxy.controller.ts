@@ -9,7 +9,8 @@ import { ProxyService } from './proxy.service';
 /**
  * Routes the public API to the owning service. Each service enforces its own authorization;
  * the gateway adds tenant context, rejects bad tokens early and rate-limits.
- * Each service owns a prefix: /v1/catalog → catalog, /v1/learning → learning, everything else → IAM.
+ * Each service owns a prefix: /v1/catalog → catalog, /v1/learning → learning,
+ * /v1/notifications → notify, everything else → IAM.
  */
 @ApiExcludeController()
 @Public()
@@ -28,6 +29,11 @@ export class ProxyController {
   @All(['v1/learning/*'])
   async learning(@Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
     await this.proxy.forward(req, reply, this.config.LEARNING_URL);
+  }
+
+  @All(['v1/notifications', 'v1/notifications/*'])
+  async notify(@Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
+    await this.proxy.forward(req, reply, this.config.NOTIFY_URL);
   }
 
   @All(['v1/*', '.well-known/*', 'scim/v2/*'])

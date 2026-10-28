@@ -1,4 +1,5 @@
 import { baseConfigSchema, booleanString } from '@lib/config';
+import { storageConfigShape } from '@lib/storage';
 import { z } from 'zod';
 
 export const catalogConfigSchema = baseConfigSchema.extend({
@@ -23,6 +24,8 @@ export const catalogConfigSchema = baseConfigSchema.extend({
   CATALOG_SEED_OWNER_SLUG: z.string().default('platform'),
 
   IAM_JWKS_URL: z.string().url(),
+  /** Course images and videos uploaded in the browser (MEDIA-1). */
+  ...storageConfigShape,
 });
 
 export type CatalogConfig = z.infer<typeof catalogConfigSchema>;

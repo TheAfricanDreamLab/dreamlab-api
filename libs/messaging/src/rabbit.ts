@@ -100,16 +100,28 @@ export class RabbitConnection {
       envelope = JSON.parse(msg.content.toString('utf8')) as EventEnvelope;
     } catch {
       this.logger.error(`Unparseable message on ${sub.queue}; dead-lettering`);
-      ch.nack(msg, false, false);
+      this.settle(() => ch.nack(msg, false, false));
       return;
     }
     try {
       await sub.handler(envelope);
-      ch.ack(msg);
+      this.settle(() => ch.ack(msg));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Handler failed on ${sub.queue} for ${envelope.type} ${envelope.id}: ${message}`);
-      ch.nack(msg, false, !msg.fields.redelivered);
+      this.settle(() => ch.nack(msg, false, !msg.fields.redelivered));
+    }
+  }
+
+  /**
+   * Ack or nack, unless the channel closed meanwhile (reconnect, shutdown): the broker then
+   * redelivers the unacknowledged message itself, so there is nothing left to do.
+   */
+  private settle(fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      this.logger.warn(`Channel closed before the message was settled; it will be redelivered (${err instanceof Error ? err.message : String(err)})`);
     }
   }
 

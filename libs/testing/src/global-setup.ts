@@ -6,11 +6,12 @@
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { RabbitMQContainer } from '@testcontainers/rabbitmq';
 import { RedisContainer } from '@testcontainers/redis';
+import { GenericContainer, Wait } from 'testcontainers';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
 export default async function globalSetup(): Promise<void> {
-  const [postgres, redis, rabbit] = await Promise.all([
+  const [postgres, redis, rabbit, azurite] = await Promise.all([
     new PostgreSqlContainer('postgres:17-alpine')
       .withUsername('postgres')
       .withPassword('postgres')
@@ -22,7 +23,21 @@ export default async function globalSetup(): Promise<void> {
     // Clustered, like Azure Managed Redis: a MULTI across hash slots fails here as it does there.
     new RedisContainer('redis:7.4-alpine').withCommand(['redis-server', '--cluster-enabled', 'yes']).start(),
     new RabbitMQContainer('rabbitmq:4.1-management-alpine').withStartupTimeout(180_000).start(),
+    // Azure Blob Storage emulator, for uploads (MEDIA-1).
+    new GenericContainer('mcr.microsoft.com/azure-storage/azurite:3.34.0')
+      .withCommand(['azurite-blob', '--blobHost', '0.0.0.0', '--skipApiVersionCheck', '--loose'])
+      .withExposedPorts(10000)
+      .withWaitStrategy(Wait.forLogMessage(/successfully listens/))
+      .start(),
   ]);
+
+  // As on Azure, where the admin cannot grant BYPASSRLS: system roles work through their explicit
+  // policies (each service's system_role_policies migration), so the tests prove those are complete.
+  const nobypass = await postgres.exec([
+    'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c',
+    ['iam', 'catalog', 'learning', 'notify'].map((s) => `ALTER ROLE ${s}_system NOBYPASSRLS;`).join(' '),
+  ]);
+  if (nobypass.exitCode !== 0) throw new Error(`Could not drop BYPASSRLS: ${nobypass.output}`);
 
   // One node owns every slot, so plain (non-cluster) clients keep working.
   const slots = await redis.exec(['redis-cli', 'cluster', 'addslotsrange', '0', '16383']);
@@ -46,10 +61,15 @@ export default async function globalSetup(): Promise<void> {
     LEARNING_DATABASE_URL: pg('learning_app', 'dreamlab_learning'),
     LEARNING_SYSTEM_DATABASE_URL: pg('learning_system', 'dreamlab_learning'),
     LEARNING_MIGRATION_DATABASE_URL: pg('learning_owner', 'dreamlab_learning'),
+    NOTIFY_DATABASE_URL: pg('notify_app', 'dreamlab_notify'),
+    NOTIFY_SYSTEM_DATABASE_URL: pg('notify_system', 'dreamlab_notify'),
+    NOTIFY_MIGRATION_DATABASE_URL: pg('notify_owner', 'dreamlab_notify'),
+    // Azurite's published development account key.
+    STORAGE_CONNECTION_STRING: `DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://${azurite.getHost()}:${azurite.getMappedPort(10000)}/devstoreaccount1;`,
     REDIS_URL: redis.getConnectionUrl(),
     RABBITMQ_URL: rabbit.getAmqpUrl(),
     // Every spec file boots IAM against the same database, so they must share the key that encrypts its signing keys.
     E2E_KEY_ENCRYPTION_SECRET: randomBytes(32).toString('base64'),
   });
-  (globalThis as Record<string, unknown>).__E2E_CONTAINERS__ = [postgres, redis, rabbit];
+  (globalThis as Record<string, unknown>).__E2E_CONTAINERS__ = [postgres, redis, rabbit, azurite];
 }

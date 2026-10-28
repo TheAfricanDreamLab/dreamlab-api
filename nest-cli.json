@@ -66,6 +66,22 @@
           }
         ]
       }
+    },
+    "notify": {
+      "type": "application",
+      "root": "apps/notify",
+      "entryFile": "main",
+      "sourceRoot": "apps/notify/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/notify/tsconfig.app.json",
+        "assets": [
+          {
+            "include": "database/migrations/**/*",
+            "outDir": "dist/apps/notify",
+            "watchAssets": true
+          }
+        ]
+      }
     }
   }
 }

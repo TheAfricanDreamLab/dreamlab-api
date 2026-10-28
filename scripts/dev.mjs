@@ -5,6 +5,7 @@ const services = [
   { name: 'iam', color: 36 },
   { name: 'catalog', color: 33 },
   { name: 'learning', color: 32 },
+  { name: 'notify', color: 34 },
   { name: 'gateway', color: 35 },
 ];
 

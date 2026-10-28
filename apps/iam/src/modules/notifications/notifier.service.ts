@@ -2,11 +2,10 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type { OtpPurpose } from '@dreamlab/contracts';
 import { AppException } from '@lib/common';
 import { CONFIG } from '@lib/config';
+import { escapeHtml, type EmailSender } from '@lib/email';
 import type { IamConfig } from '../../config';
 import type { InvitationMessage, Notifier, OtpMessage } from './interfaces/notifier.interface';
-import type { EmailSender } from './providers/email-sender.interface';
 import type { SmsSender } from './providers/sms-sender.interface';
-import { escapeHtml } from './utils/escape-html';
 
 export const NOTIFIER = Symbol('NOTIFIER');
 export const EMAIL_SENDER = Symbol('EMAIL_SENDER');

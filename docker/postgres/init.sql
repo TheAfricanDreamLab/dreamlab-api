@@ -38,3 +38,15 @@ GRANT CONNECT ON DATABASE dreamlab_learning TO learning_app, learning_system;
 \connect dreamlab_learning
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 ALTER SCHEMA public OWNER TO learning_owner;
+
+\connect postgres
+CREATE ROLE notify_owner LOGIN PASSWORD 'notify_owner';
+CREATE ROLE notify_app LOGIN PASSWORD 'notify_app';
+CREATE ROLE notify_system LOGIN PASSWORD 'notify_system' BYPASSRLS;
+CREATE DATABASE dreamlab_notify OWNER notify_owner;
+REVOKE ALL ON DATABASE dreamlab_notify FROM PUBLIC;
+GRANT CONNECT ON DATABASE dreamlab_notify TO notify_app, notify_system;
+
+\connect dreamlab_notify
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+ALTER SCHEMA public OWNER TO notify_owner;

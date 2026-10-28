@@ -1,4 +1,4 @@
-import { AuthoringOverviewSchema, CreateDraftSchema, DraftSchema, RequestChangesSchema, ReviewNoteSchema, SaveDraftSchema, UuidSchema } from '@dreamlab/contracts';
+import { AuthoringOverviewSchema, CourseMediaUploadRequestSchema, CourseMediaUploadSchema, CreateDraftSchema, DraftSchema, RequestChangesSchema, ReviewNoteSchema, SaveDraftSchema, UuidSchema } from '@dreamlab/contracts';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
@@ -10,3 +10,5 @@ export class ReviewNoteDto extends createZodDto(ReviewNoteSchema) {}
 export class RequestChangesDto extends createZodDto(RequestChangesSchema) {}
 export class EmptyBodyDto extends createZodDto(z.object({}).strict()) {}
 export class DraftParamsDto extends createZodDto(z.object({ draftId: UuidSchema })) {}
+export class CourseMediaUploadRequestDto extends createZodDto(CourseMediaUploadRequestSchema) {}
+export class CourseMediaUploadDto extends createZodDto(CourseMediaUploadSchema) {}

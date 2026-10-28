@@ -8,12 +8,14 @@ import {
   ItemView,
   QuizAttempt,
   ReleasedGrade,
+  SubmissionFile,
+  SubmissionFileUpload,
   toDeliveryContent,
 } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { badRequest, conflict, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
-import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
+import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { CatalogClient, ContentItemRef, CourseContent, IamRpc, RpcClient, UserName } from '@lib/rpc';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
@@ -21,6 +23,7 @@ import { LearningEvents } from '../../events';
 import { CATALOG, EnrollmentRow, flatItems, learnerCtx, toEnrollment } from '../enrollments/enrollments.service';
 import { checkBlock, findBlock, gradeQuiz, interactiveBlocks, isSettled, wordCount } from './grading';
 import { courseFinalScore, itemScores, releasedGrades } from '../grading/course-score';
+import { FilesService } from '../files/files.service';
 
 export const IAM_NAMES = Symbol('IAM_NAMES');
 
@@ -47,6 +50,7 @@ export class PlayerService {
     @InjectOutbox() private readonly outbox: OutboxWriter,
     @Inject(CATALOG) private readonly catalog: CatalogClient,
     @Inject(IAM_NAMES) private readonly iam: RpcClient,
+    private readonly files: FilesService,
   ) {}
 
   async getItem(p: Principal, enrollmentId: string, itemId: string): Promise<ItemView> {
@@ -63,6 +67,7 @@ export class PlayerService {
         .orderBy(asc(submissions.submittedAt));
       return { mine: rows, graded: await releasedGrades(tx, rows.filter((s) => s.kind === 'assignment').map((s) => s.id)) };
     });
+    const files = await this.files.describe(mine.flatMap((s) => s.fileAssetIds));
     const all = flatItems(content);
     const at = all.findIndex((i) => i.id === item.id);
     const nav = (i: (typeof all)[number] | undefined) => (i ? { id: i.id, title: i.title, type: i.type } : null);
@@ -75,7 +80,7 @@ export class PlayerService {
       status: progress.status,
       state: progress.state,
       quizAttempts: mine.filter((s) => s.kind === 'quiz').map((s) => this.toAttempt(s)),
-      submissions: mine.filter((s) => s.kind === 'assignment').map((s) => this.toSubmission(s, graded.get(s.id) ?? null)),
+      submissions: mine.filter((s) => s.kind === 'assignment').map((s) => this.toSubmission(s, graded.get(s.id) ?? null, files)),
       discussion: item.type === 'discussion' ? await this.discussion(p, enrollment, item) : null,
       previous: nav(all[at - 1]),
       next: nav(all[at + 1]),
@@ -190,9 +195,21 @@ export class PlayerService {
     });
   }
 
-  async submitAssignment(p: Principal, enrollmentId: string, itemId: string, body: { text: string; link: string | null; selfAssessment: Record<string, boolean> }): Promise<AssignmentSubmission> {
+  async uploadFile(p: Principal, enrollmentId: string, itemId: string, req: { fileName: string; contentType: string; size: number }): Promise<SubmissionFileUpload> {
+    const { enrollment, item } = await this.locate(p, enrollmentId, itemId);
+    if (item.authoring.type !== 'assignment') throw badRequest('not_an_assignment', 'This item is not an assignment.');
+    return this.files.uploadTicket(p, enrollment.id, item.id, req);
+  }
+
+  async submitAssignment(
+    p: Principal,
+    enrollmentId: string,
+    itemId: string,
+    body: { text: string; link: string | null; fileIds: string[]; selfAssessment: Record<string, boolean> },
+  ): Promise<AssignmentSubmission> {
     const { enrollment, content, item } = await this.locate(p, enrollmentId, itemId);
     if (item.authoring.type !== 'assignment') throw badRequest('not_an_assignment', 'This item is not an assignment.');
+    const fileIds = await this.files.verify(p, enrollment.id, item.id, body.fileIds);
     const minWords = item.authoring.payload.minWords;
     if (wordCount(body.text) < minWords) throw badRequest('submission_too_short', `Write at least ${minWords} words.`);
     const criteria = new Set(item.authoring.payload.rubric.map((r) => r.id));
@@ -218,6 +235,7 @@ export class PlayerService {
           attemptNo: n + 1,
           responses: { link: body.link, selfAssessment },
           body: body.text,
+          fileAssetIds: fileIds,
         })
         .returning();
       await this.outbox.add(tx, {
@@ -226,9 +244,26 @@ export class PlayerService {
         actor: userActor(p.userId),
         payload: { submissionId: row!.id, enrollmentId: enrollment.id, courseId: enrollment.courseId, itemId: item.id, version: n + 1 },
       });
+      if (enrollment.contextOrgId) {
+        await requestNotification(
+          this.outbox,
+          tx,
+          {
+            to: { permission: { orgId: enrollment.contextOrgId, permission: 'submission.grade' } },
+            exclude: [p.userId],
+            category: 'submissions',
+            title: `New work to grade: “${item.title}”`,
+            body: `${content.course.title}: version ${n + 1} was submitted${fileIds.length ? ` with ${fileIds.length} file${fileIds.length === 1 ? '' : 's'}` : ''}.`,
+            link: `/app/grading/${row!.id}`,
+            orgId: enrollment.contextOrgId,
+            key: `submission:${row!.id}`,
+          },
+          userActor(p.userId),
+        );
+      }
       await this.complete(tx, p, enrollment, content, item);
-      return this.toSubmission(row!);
-    });
+      return row!;
+    }).then(async (row) => this.toSubmission(row, null, await this.files.describe(row.fileAssetIds)));
   }
 
   async postDiscussion(p: Principal, enrollmentId: string, itemId: string, body: { body: string; parentId: string | null }): Promise<Discussion> {
@@ -434,8 +469,17 @@ export class PlayerService {
     return { attemptNo: s.attemptNo, scorePct: r.scorePct, passed: r.passed, results: r.results, submittedAt: s.submittedAt.toISOString() };
   }
 
-  private toSubmission(s: typeof submissions.$inferSelect, grade: ReleasedGrade | null = null): AssignmentSubmission {
+  private toSubmission(s: typeof submissions.$inferSelect, grade: ReleasedGrade | null, files: Map<string, SubmissionFile>): AssignmentSubmission {
     const r = s.responses as { link?: string | null; selfAssessment?: Record<string, boolean> };
-    return { id: s.id, version: s.attemptNo, text: s.body ?? '', link: r.link ?? null, selfAssessment: r.selfAssessment ?? {}, submittedAt: s.submittedAt.toISOString(), grade };
+    return {
+      id: s.id,
+      version: s.attemptNo,
+      text: s.body ?? '',
+      link: r.link ?? null,
+      files: s.fileAssetIds.flatMap((id) => (files.has(id) ? [files.get(id)!] : [])),
+      selfAssessment: r.selfAssessment ?? {},
+      submittedAt: s.submittedAt.toISOString(),
+      grade,
+    };
   }
 }

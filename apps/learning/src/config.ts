@@ -1,4 +1,5 @@
 import { baseConfigSchema, booleanString } from '@lib/config';
+import { storageConfigShape } from '@lib/storage';
 import { z } from 'zod';
 
 export const learningConfigSchema = baseConfigSchema.extend({
@@ -13,6 +14,8 @@ export const learningConfigSchema = baseConfigSchema.extend({
   LEARNING_MIGRATE_ON_BOOT: booleanString.default('false'),
 
   IAM_JWKS_URL: z.string().url(),
+  /** Learners' assignment files (MEDIA-1). */
+  ...storageConfigShape,
 });
 
 export type LearningConfig = z.infer<typeof learningConfigSchema>;

@@ -3,9 +3,10 @@ import { type Grade, type GradingQueueItem, type GradingStatus, rubricScorePct, 
 import { AUTHZ_CHECKER, AuthzChecker, hasOrgPermission, type Principal } from '@lib/auth';
 import { badRequest, conflict, forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
-import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
+import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { CatalogClient, CourseContent, IamRpc, RpcClient, UserName } from '@lib/rpc';
 import { and, desc, eq, inArray, isNull, type SQL } from 'drizzle-orm';
+import { FilesService } from '../files/files.service';
 import { LearningDatabase, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, flatItems } from '../enrollments/enrollments.service';
@@ -42,6 +43,7 @@ export class GradingService {
     @InjectOutbox() private readonly outbox: OutboxWriter,
     @Inject(CATALOG) private readonly catalog: CatalogClient,
     @Inject(IAM_NAMES) private readonly iam: RpcClient,
+    private readonly files: FilesService,
     @Optional() @Inject(AUTHZ_CHECKER) private readonly authz?: AuthzChecker,
   ) {}
 
@@ -146,11 +148,35 @@ export class GradingService {
         requestId,
         payload: { gradeId, submissionId: submission.id, enrollmentId: enrollment.id, userId: submission.userId, itemId: submission.contentItemId, scorePct, finalScore },
       });
+      await requestNotification(
+        this.outbox,
+        tx,
+        {
+          to: { userIds: [submission.userId] },
+          category: 'grades',
+          title: `Your work on “${item.title}” was graded`,
+          body: `${content.course.title}: you scored ${scorePct}%.${input.feedback ? ' Your teacher left feedback.' : ''}`,
+          link: `/learn/${enrollment.id}/${item.id}`,
+          orgId: enrollment.contextOrgId,
+          key: `grade:${gradeId}`,
+        },
+        userActor(p.userId),
+      );
     });
     return this.view(submission, enrollment, content);
   }
 
   // ---------- access ----------
+
+  /** May the caller grade (and so open the files of) this submission? */
+  async mayGrade(p: Principal, submissionId: string): Promise<boolean> {
+    try {
+      await this.gradable(p, submissionId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   /** A submission the caller may grade; anything else is not found. Nobody grades their own work. */
   private async gradable(p: Principal, submissionId: string): Promise<{ submission: SubmissionRow; enrollment: EnrollmentRow }> {
@@ -217,6 +243,7 @@ export class GradingService {
     ]);
     const versionGrades = await this.latestGrades(versions.map((v) => v.id));
     const names = await this.userNames([submission.userId, ...history.flatMap((g) => (g.graderUserId ? [g.graderUserId] : []))]);
+    const files = await this.files.describe(submission.fileAssetIds);
     const r = submission.responses as { link?: string | null; selfAssessment?: Record<string, boolean> };
     const toGrade = (g: GradeRow): Grade => ({
       id: g.id,
@@ -234,6 +261,7 @@ export class GradingService {
       status: statusOf(history[0]),
       text: submission.body ?? '',
       link: r.link ?? null,
+      files: submission.fileAssetIds.flatMap((id) => (files.has(id) ? [files.get(id)!] : [])),
       selfAssessment: r.selfAssessment ?? {},
       learner: { userId: submission.userId, name: names.get(submission.userId) ?? 'Learner' },
       course: { slug: course.course.slug, title: course.course.title },

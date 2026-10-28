@@ -10,4 +10,5 @@ export * from '../modules/cohorts/entities/class-session.entity';
 export * from '../modules/cohorts/entities/program-enrollment.entity';
 export * from '../modules/cohorts/entities/elective-selection.entity';
 export * from '../modules/cohorts/entities/attendance.entity';
+export * from '../modules/files/entities/learner-file.entity';
 export { inbox, outbox } from '@lib/messaging';

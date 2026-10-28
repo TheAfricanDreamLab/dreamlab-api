@@ -11,14 +11,25 @@ apps/
   gateway/   public edge: tenant from host/origin, token check, rate limits, routing, aggregated Swagger
   iam/       identity and access: accounts, Google sign-in, OTP, sessions, tokens (EdDSA + JWKS),
              organisations, memberships, roles, org units, groups, invitations
+  catalog/   courses, versions, programmes, the public catalogue, course authoring (drafts, review),
+             course media uploads
+  learning/  enrolments, the course player, submissions and files, cohorts, attendance, grading,
+             Programme Score, class-session reminders
+  notify/    notifications: one per person (in the app), email by category preference; fed by
+             `notification.requested` events from any service
 libs/
   auth/       token verification, global guards, @Public / @RequirePermission / @CurrentPrincipal, RPC authz client
   common/     error shape, Redis, rate limiter, ids, HTTP + Swagger bootstrap
   config/     Zod-validated environment, .env loading
   database/   Drizzle per service, two pools (RLS app role + system role), migrations, ltree/citext
+  email/      email providers (Resend, ZeptoMail, console in development), shared by iam and notify
   health/     /health with dependency checks
   logger/     pino with request ids and redaction
-  messaging/  RabbitMQ topology, outbox writer + relay, inbox (exactly-once effect), event envelope
+  messaging/  RabbitMQ topology, outbox writer + relay, inbox (exactly-once effect), event envelope,
+              requestNotification (ask notify to tell people something, in the caller's transaction)
+  rpc/        RabbitMQ RPC patterns and clients between services (catalog content, IAM names, contacts,
+              permission holders)
+  storage/    Azure Blob Storage (Azurite locally): write-only upload links, private read links
   testing/    Testcontainers global setup and request helpers
 ```
 
@@ -35,7 +46,9 @@ interfaces/  utils/  providers/   types, pure helpers and pluggable implementati
 
 IAM's features are `auth`, `users`, `keys`, `otp`, `notifications`, `authz`, `organizations`, `members`, `invitations`, `org-structure`, `me` and `seed`; cross-feature helpers live in `src/common/` (request-meta decorator, row→response mappers, shared DTOs) and `src/database/` (schema barrel, column helpers, migrations). The gateway's are `proxy`, `tenancy` and `docs`.
 
-Rules enforced by lint: an app imports only from `libs/`, never another app; libraries never import apps. Each service owns its own database (`dreamlab_<service>`), with three roles: `<svc>_owner` (migrations), `<svc>_app` (row-level security enforced) and `<svc>_system` (BYPASSRLS, for deliberate cross-tenant work).
+Rules enforced by lint: an app imports only from `libs/`, never another app; libraries never import apps. Each service owns its own database (`dreamlab_<service>`), with three roles: `<svc>_owner` (migrations), `<svc>_app` (row-level security enforced) and `<svc>_system` (deliberate cross-tenant work). On Azure the system role cannot hold BYPASSRLS, so every
+RLS table also gets an explicit `TO <svc>_system` policy in a migration; `libs/database/src/system-policies.spec.ts`
+fails when one is missing. The e2e suites run the system roles without BYPASSRLS, as on Azure.
 
 Request and response shapes come from [`@dreamlab/contracts`](https://github.com/TheAfricanDreamLab/dreamlab-contracts), pinned to an exact tag.
 
@@ -46,8 +59,21 @@ Requirements: Node 24+, pnpm 10, Docker.
 ```sh
 pnpm install
 cp .env.example .env      # then fill in IAM_KEY_ENCRYPTION_SECRET, INTERNAL_GATEWAY_TOKEN, BOOTSTRAP_ADMIN_PASSWORD
-pnpm dev                  # docker compose up + iam (3001) + gateway (3000), watch mode
+pnpm dev                  # docker compose up + every service in watch mode
 ```
+
+| Service | Port | | Dependency (docker compose) | Port |
+|---|---|---|---|---|
+| gateway | 3000 | | Postgres | 5433 |
+| iam | 3001 | | Redis | 6379 |
+| catalog | 3002 | | RabbitMQ | 5672 (console 15672) |
+| learning | 3003 | | Azurite (Blob Storage) | 10000 |
+| notify | 3004 | | | |
+
+A database created before a service existed (for example `dreamlab_notify`) is not added by
+`docker/postgres/init.sql` to an existing volume: run that service's block of `init.sql` with
+`docker compose exec -T postgres psql -U postgres`, or recreate the volume. In development, catalog
+and learning create the Azurite containers and their CORS rule on boot.
 
 - API docs (all services): http://localhost:3000/docs
 - Health: http://localhost:3000/health
@@ -89,9 +115,10 @@ curl -s localhost:3000/v1/auth/verify -H 'content-type: application/json' -d '{"
 | `pnpm build` | Build every service to `dist/apps/<service>` |
 | `pnpm lint` / `pnpm typecheck` | ESLint (with service-boundary rules) / TypeScript |
 | `pnpm test` | Unit tests |
-| `pnpm test:e2e` | End-to-end tests against real Postgres, Redis and RabbitMQ (Testcontainers; Docker required) |
+| `pnpm test:e2e` | End-to-end tests against real Postgres, Redis, RabbitMQ and Azurite (Testcontainers; Docker required) |
 | `pnpm iam:migrate` / `pnpm iam:seed` / `pnpm iam:rotate-keys` | IAM operations |
 | `pnpm iam:generate` | Generate a migration from schema changes |
+| `pnpm <svc>:migrate` / `pnpm <svc>:generate` | The same for catalog, learning and notify (`catalog:seed` loads test content) |
 | `pnpm run license-check` | Fail on any dependency outside the licence allowlist |
 | `docker build --build-arg APP=iam .` | Production image for one service |
 

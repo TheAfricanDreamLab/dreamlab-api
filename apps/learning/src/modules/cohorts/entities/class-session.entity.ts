@@ -18,6 +18,8 @@ export const classSessions = pgTable(
     mode: text('mode', { enum: ['virtual', 'physical'] }).notNull(),
     location: text('location'),
     cancelled: boolean('cancelled').notNull().default(false),
+    /** When learners were reminded it is coming up (NOTIFY-1); cleared when it moves. */
+    reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [index('class_sessions_cohort_start').on(t.cohortId, t.startsAt)],
