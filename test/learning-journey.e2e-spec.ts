@@ -683,11 +683,16 @@ describe('faculty grading (LRN-3)', () => {
     expect(((await request(notify, 'GET', '/v1/notifications', L(student))).body as { items: Notification[] }).items.some((n) => n.category === 'submissions')).toBe(false);
 
     const graded = await notificationsFor(student, (n) => n.category === 'grades', 2);
-    // Two releases on version 1 (75%, then the 100% regrade); drafts tell nobody.
-    expect(graded.filter((n) => n.category === 'grades').map((n) => n.body)).toEqual([expect.stringContaining('100%'), expect.stringContaining('75%')]);
+    // Two releases on version 1 (75%, then the 100% regrade); drafts tell nobody. Events are handled
+    // concurrently, so the two may arrive in either order.
+    const gradeBodies = graded.filter((n) => n.category === 'grades').map((n) => n.body);
+    expect(gradeBodies).toHaveLength(2);
+    expect(gradeBodies).toEqual(expect.arrayContaining([expect.stringContaining('100%'), expect.stringContaining('75%')]));
     expect(graded[0]!.link).toBe(`/learn/${enrollmentId}/${itemId}`);
     await eventually(() => mail.to('student@kano-studio.test').length >= 2);
-    expect(mail.to('student@kano-studio.test')[0]).toMatchObject({ subject: expect.stringContaining('was graded'), html: expect.stringContaining(`https://learn.test/learn/${enrollmentId}/${itemId}`) });
+    expect(mail.to('student@kano-studio.test')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ subject: expect.stringContaining('was graded'), html: expect.stringContaining(`https://learn.test/learn/${enrollmentId}/${itemId}`) })]),
+    );
 
     const unread = (await request(notify, 'GET', '/v1/notifications/unread-count', L(student))).body as { unread: number };
     expect(unread.unread).toBeGreaterThanOrEqual(2);
