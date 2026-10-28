@@ -13,6 +13,7 @@ import { OutboxRelay, OutboxWriter, RelayOptions } from './outbox';
 import { RabbitConnection } from './rabbit';
 
 export * from './envelope';
+export * from './notifications';
 export * from './outbox';
 export * from './rabbit';
 export * from './schema';

@@ -1,4 +1,4 @@
-import { parseFrom } from '../utils/parse-from';
+import { parseFrom } from './parse-from';
 import type { EmailMessage, EmailSender } from './email-sender.interface';
 import { postJson } from './post-json';
 

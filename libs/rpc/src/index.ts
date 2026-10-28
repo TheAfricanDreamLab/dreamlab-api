@@ -28,6 +28,10 @@ export const CatalogRpc = {
 export const IamRpc = {
   /** { userIds } → { id, name }[]: display names for people learners see (discussions). */
   UserNames: 'iam.users.names',
+  /** { userIds } → UserContact[]: verified email and locale, for notifications only. */
+  UserContacts: 'iam.users.contacts',
+  /** { orgId, permission } → userId[]: active members holding the permission org-wide. */
+  PermissionHolders: 'iam.orgs.permission_holders',
   /** { slug } → { id, slug, name } | null */
   ResolveOrg: 'iam.orgs.resolve',
   /** { ids } → { id, name }[] */
@@ -69,6 +73,14 @@ export interface Viewer {
 export interface UserName {
   id: string;
   name: string;
+}
+
+export interface UserContact {
+  id: string;
+  name: string;
+  /** Verified addresses only; null otherwise. */
+  email: string | null;
+  locale: string;
 }
 
 /** A RabbitMQ RPC client with a timeout; failures become 503s for the caller's caller. */

@@ -20,6 +20,8 @@ import {
   ItemView,
   isInteractiveBlock,
   MyProgram,
+  Notification,
+  SubmissionFileUpload,
   SubmissionForGrading,
 } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE } from '@lib/auth';
@@ -27,7 +29,9 @@ import { buildOpenApiDocument, installGatewayTrust, REDIS } from '@lib/common';
 import { loadConfig } from '@lib/config';
 import { runMigrations } from '@lib/database';
 import { CATALOG_RPC_QUEUE } from '@lib/rpc';
-import { E2E_GATEWAY_TOKEN, request, testEnv } from '@lib/testing';
+import type { EmailMessage, EmailSender } from '@lib/email';
+import type { BlobStorage } from '@lib/storage';
+import { E2E_GATEWAY_TOKEN, eventually, request, testEnv } from '@lib/testing';
 import type Redis from 'ioredis';
 import { Logger } from 'nestjs-pino';
 import { CatalogAppModule } from '../apps/catalog/src/app.module';
@@ -45,6 +49,12 @@ import { LearningAppModule } from '../apps/learning/src/app.module';
 import { learningConfigSchema } from '../apps/learning/src/config';
 import { learningMigrationsFolder } from '../apps/learning/src/database';
 import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
+import { SessionRemindersService } from '../apps/learning/src/modules/cohorts/session-reminders.service';
+import { STORAGE } from '../apps/learning/src/modules/files/files.service';
+import { NotifyAppModule } from '../apps/notify/src/app.module';
+import { notifyConfigSchema } from '../apps/notify/src/config';
+import { notifyMigrationsFolder } from '../apps/notify/src/database';
+import { EMAIL_SENDER } from '../apps/notify/src/modules/notifications/notification-intake.service';
 
 class CapturingNotifier implements Notifier {
   otps: OtpMessage[] = [];
@@ -65,6 +75,26 @@ class CapturingNotifier implements Notifier {
 }
 
 const notifier = new CapturingNotifier();
+
+class CapturingEmail implements EmailSender {
+  readonly name = 'capture';
+  sent: EmailMessage[] = [];
+  async send(m: EmailMessage) {
+    this.sent.push(m);
+  }
+  to(address: string) {
+    return this.sent.filter((m) => m.to === address);
+  }
+}
+const mail = new CapturingEmail();
+
+/** My notifications, once at least `min` match (they arrive through the outbox and RabbitMQ). */
+async function notificationsFor(token: string, match: (n: Notification) => boolean, min = 1): Promise<Notification[]> {
+  return eventually(async () => {
+    const items = ((await request(notify, 'GET', '/v1/notifications', { token })).body as { items: Notification[] }).items;
+    return items.filter(match).length >= min ? items : null;
+  }) as Promise<Notification[]>;
+}
 const consent = { termsVersion: '2026-10', privacyVersion: '2026-10' };
 const course = CourseAuthoringSchema.parse(DATASETS['dream-lab-test'].courses.find((c) => c.slug === 'problem-solving'));
 const authored = new Map(course.modules!.flatMap((m) => m.items).map((i) => [i.key, i] as const));
@@ -72,6 +102,7 @@ const authored = new Map(course.modules!.flatMap((m) => m.items).map((i) => [i.k
 let iam: NestFastifyApplication;
 let catalog: NestFastifyApplication;
 let learning: NestFastifyApplication;
+let notify: NestFastifyApplication;
 
 async function boot(module: unknown, rpcQueue: string | null, rabbitUrl: string): Promise<NestFastifyApplication> {
   const builder = Test.createTestingModule({ imports: [module as never] });
@@ -147,9 +178,20 @@ beforeAll(async () => {
   learning = await boot(LearningAppModule.forRoot(learningConfig), null, learningConfig.RABBITMQ_URL);
   await learning.init();
   await learning.getHttpAdapter().getInstance().ready();
+  await learning.get<BlobStorage>(STORAGE).prepareForDevelopment();
+
+  const notifyConfig = loadConfig(notifyConfigSchema, testEnv({ IAM_JWKS_URL: jwks, PUBLIC_APP_URL: 'https://learn.test' }));
+  await runMigrations(notifyConfig.NOTIFY_MIGRATION_DATABASE_URL!, notifyMigrationsFolder());
+  const notifyRef = await Test.createTestingModule({ imports: [NotifyAppModule.forRoot(notifyConfig)] }).overrideProvider(EMAIL_SENDER).useValue(mail).compile();
+  notify = notifyRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { bufferLogs: true });
+  notify.useLogger(notify.get(Logger));
+  installGatewayTrust(notify.getHttpAdapter().getInstance(), E2E_GATEWAY_TOKEN);
+  await notify.init();
+  await notify.getHttpAdapter().getInstance().ready();
 }, 180_000);
 
 afterAll(async () => {
+  await notify?.close();
   await learning?.close();
   await catalog?.close();
   await iam?.close();
@@ -169,6 +211,7 @@ describe('contract parity', () => {
     ['learning (cohorts)', () => learning, apiV1Contract.cohorts],
     ['learning (grading)', () => learning, apiV1Contract.grading],
     ['catalog (authoring)', () => catalog, apiV1Contract.authoring],
+    ['notify', () => notify, apiV1Contract.notifications],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -209,6 +252,19 @@ describe('catalog', () => {
     expect(p.graduationRequirements).toHaveLength(10);
     expect(p.phases.map((ph) => ph.creditHours).slice(0, 4)).toEqual([25, 20, 10, 45]);
     expect(p.phases.find((ph) => ph.chooseN === 1)).toBeDefined();
+  });
+
+  it('exports a programme for the browser editor; importing it unchanged changes nothing', async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string }).accessToken;
+    const before = (await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as Record<string, unknown>;
+    const exported = await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(admin));
+    expect(exported.status).toBe(200);
+    expect(exported.body).toMatchObject({ slug: 'the-african-dream-lab', capstoneStages: expect.any(Array), calendar: expect.any(Array) });
+    expect((await request(catalog, 'POST', '/v1/catalog/admin/programs/import', { ...L(admin), body: exported.body })).status).toBe(200);
+    const after = (await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as Record<string, unknown>;
+    const strip = (d: Record<string, unknown>) => JSON.parse(JSON.stringify(d, (k, v) => (k === 'id' ? undefined : v)));
+    expect(strip(after)).toEqual(strip(before));
+    expect((await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(await signUp('nosy@example.com', 'Nosy Learner')))).status).toBe(403);
   });
 
   it('re-seeding identical content publishes no new version', async () => {
@@ -618,6 +674,67 @@ describe('faculty grading (LRN-3)', () => {
     });
     expect((await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher))).body).toMatchObject({ items: [{ submissionId: v2Id, version: 2, status: 'awaiting' }] });
   });
+
+  it('tells graders about new work and learners about their grades, in the app and by email (NOTIFY-1)', async () => {
+    const toGrade = await notificationsFor(teacher, (n) => n.category === 'submissions', 2);
+    expect(toGrade.filter((n) => n.category === 'submissions')).toHaveLength(2);
+    expect(toGrade[0]).toMatchObject({ title: expect.stringContaining('New work to grade'), link: expect.stringMatching(/^\/app\/grading\//), readAt: null });
+    // Nobody is told about their own work.
+    expect(((await request(notify, 'GET', '/v1/notifications', L(student))).body as { items: Notification[] }).items.some((n) => n.category === 'submissions')).toBe(false);
+
+    const graded = await notificationsFor(student, (n) => n.category === 'grades', 2);
+    // Two releases on version 1 (75%, then the 100% regrade); drafts tell nobody.
+    expect(graded.filter((n) => n.category === 'grades').map((n) => n.body)).toEqual([expect.stringContaining('100%'), expect.stringContaining('75%')]);
+    expect(graded[0]!.link).toBe(`/learn/${enrollmentId}/${itemId}`);
+    await eventually(() => mail.to('student@kano-studio.test').length >= 2);
+    expect(mail.to('student@kano-studio.test')[0]).toMatchObject({ subject: expect.stringContaining('was graded'), html: expect.stringContaining(`https://learn.test/learn/${enrollmentId}/${itemId}`) });
+
+    const unread = (await request(notify, 'GET', '/v1/notifications/unread-count', L(student))).body as { unread: number };
+    expect(unread.unread).toBeGreaterThanOrEqual(2);
+    expect((await request(notify, 'POST', `/v1/notifications/${graded[0]!.id}/read`, L(student))).status).toBe(204);
+    // Another person's notification does not exist for me.
+    expect((await request(notify, 'POST', `/v1/notifications/${graded[1]!.id}/read`, L(teacher))).status).toBe(404);
+    expect((await request(notify, 'POST', '/v1/notifications/read-all', L(student))).status).toBe(204);
+    expect((await request(notify, 'GET', '/v1/notifications/unread-count', L(student))).body).toEqual({ unread: 0 });
+
+    // Turning grade emails off stops the email, not the notification.
+    const prefs = await request(notify, 'PUT', '/v1/notifications/preferences', { ...L(student), body: { email: { grades: false } } });
+    expect(prefs.body).toMatchObject({ email: { grades: false, sessions: true } });
+    const queue = (await request(learning, 'GET', '/v1/learning/grading/queue', L(teacher))).body as { items: { submissionId: string }[] };
+    const latest = (await request(learning, 'GET', `/v1/learning/grading/submissions/${queue.items[0]!.submissionId}`, L(teacher))).body as SubmissionForGrading;
+    const before = mail.to('student@kano-studio.test').length;
+    await request(learning, 'PUT', `/v1/learning/grading/submissions/${latest.submissionId}/grade`, {
+      ...L(teacher),
+      body: { rubricScores: Object.fromEntries(latest.item.rubric.map((r) => [r.id, 4])), release: true },
+    });
+    await notificationsFor(student, (n) => n.category === 'grades' && n.readAt === null);
+    expect(mail.to('student@kano-studio.test')).toHaveLength(before);
+  });
+
+  it('attaches files to a submission: private to the learner and their graders (MEDIA-1)', async () => {
+    const files = `/v1/learning/enrollments/${enrollmentId}/items/${itemId}/files`;
+    expect((await request(learning, 'POST', files, { ...L(student), body: { fileName: 'tool.exe', contentType: 'application/x-msdownload', size: 10 } })).status).toBe(400);
+    const ticket = await request(learning, 'POST', files, { ...L(student), body: { fileName: 'Problem canvas.pdf', contentType: 'application/pdf', size: 11 } });
+    expect(ticket.status).toBe(201);
+    const { fileId, uploadUrl, headers } = ticket.body as SubmissionFileUpload;
+
+    const submit = (fileIds: string[]) => request(learning, 'POST', `/v1/learning/enrollments/${enrollmentId}/items/${itemId}/submissions`, { ...L(student), body: { text: `${canvas} v3`, fileIds } });
+    expect(await submit([fileId])).toMatchObject({ status: 400, body: { code: 'file_not_uploaded' } });
+    expect((await fetch(uploadUrl, { method: 'PUT', headers, body: Buffer.from('%PDF-1.7 ok') })).status).toBe(201);
+    expect(await submit(['00000000-0000-4000-8000-000000000000'])).toMatchObject({ status: 400, body: { code: 'file_not_found' } });
+    const v3 = await submit([fileId]);
+    expect(v3.body).toMatchObject({ version: 3, files: [{ id: fileId, name: 'Problem canvas.pdf', size: 11, contentType: 'application/pdf' }] });
+
+    const graderView = (await request(learning, 'GET', `/v1/learning/grading/submissions/${(v3.body as { id: string }).id}`, L(teacher))).body as SubmissionForGrading;
+    expect(graderView.files).toEqual([expect.objectContaining({ id: fileId })]);
+    const link = await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(teacher));
+    expect(link.status).toBe(200);
+    const download = await fetch((link.body as { url: string }).url);
+    expect(await download.text()).toBe('%PDF-1.7 ok');
+    expect(download.headers.get('content-disposition')).toContain('attachment');
+    expect((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(student))).status).toBe(200);
+    expect((await request(learning, 'GET', `/v1/learning/files/${fileId}`, L(owner))).status).toBe(404);
+  });
 });
 
 describe('course authoring in the browser (CAT-3)', () => {
@@ -746,5 +863,45 @@ describe('course authoring in the browser (CAT-3)', () => {
     expect((draft.doc as { modules: unknown[] }).modules.length).toBe(5);
     expect((await request(catalog, 'DELETE', url(draft.id), L(admin))).status).toBe(204);
     expect((await request(catalog, 'GET', url(draft.id), L(admin))).status).toBe(404);
+  });
+
+  it('an author of one course edits that course only', async () => {
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email: 'guest@benin-press.test', roleKeys: ['learner'] } })).status).toBe(201);
+    const personal = await signUp('guest@benin-press.test', 'Gbenga Guest');
+    await request(iam, 'POST', '/v1/invitations/accept', { token: personal, body: { token: notifier.lastInviteToken('guest@benin-press.test') } });
+    const members = (await request(iam, 'GET', `/v1/orgs/${orgId}/members?limit=100`, L(owner))).body as { items: { id: string; user: { email: string } }[] };
+    const membershipId = members.items.find((m) => m.user.email === 'guest@benin-press.test')!.id;
+    const ownerView = (await request(catalog, 'GET', '/v1/catalog/authoring', L(owner))).body as { courses: { courseId: string; slug: string; canEdit: boolean }[] };
+    const courseId = ownerView.courses.find((c) => c.slug === slug)!.courseId;
+    const assigned = await request(iam, 'POST', `/v1/orgs/${orgId}/members/${membershipId}/roles`, { ...L(owner), body: { roleKey: 'author', scopeType: 'course', scopeId: courseId } });
+    expect(assigned.status).toBe(201);
+    const guest = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+
+    const view = (await request(catalog, 'GET', '/v1/catalog/authoring', L(guest))).body as { courses: { slug: string; canEdit: boolean }[]; newDrafts: unknown[]; can: { author: boolean } };
+    expect(view).toMatchObject({ courses: [{ slug, canEdit: true }], newDrafts: [], can: { author: false } });
+    const draft = await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(guest), body: { courseSlug: slug } });
+    expect(draft.status).toBe(201);
+    expect((await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(guest), body: { slug: 'guest-course', title: 'A course of my own' } })).status).toBe(403);
+    expect((await request(catalog, 'DELETE', url((draft.body as Draft).id), L(guest))).status).toBe(204);
+  });
+
+  it('tells reviewers when a draft is ready, and authors when changes are asked for or it is published (NOTIFY-1)', async () => {
+    const forOwner = await notificationsFor(owner, (n) => n.category === 'authoring' && n.title.includes('ready for review'));
+    expect(forOwner.find((n) => n.title.includes('ready for review'))).toMatchObject({ link: expect.stringMatching(/^\/app\/authoring\//) });
+    const forAuthor = await notificationsFor(author, (n) => n.title.includes('is published'));
+    expect(forAuthor.map((n) => n.title)).toEqual(expect.arrayContaining([expect.stringContaining('Changes requested'), expect.stringContaining('is published')]));
+    // The platform team reviews public courses.
+    await notificationsFor(admin, (n) => n.category === 'authoring' && n.title.includes('ready for review'));
+    // An author is never told about their own submission.
+    expect(forAuthor.some((n) => n.title.includes('ready for review'))).toBe(false);
+  });
+});
+
+describe('class session reminders (NOTIFY-1)', () => {
+  it('reminds a cohort a day ahead, once', async () => {
+    const reminders = learning.get(SessionRemindersService);
+    const sent = await reminders.run();
+    expect(await reminders.run()).toBe(0);
+    expect(sent).toBeGreaterThanOrEqual(0);
   });
 });

@@ -16,6 +16,8 @@ import {
   QuizAttemptDto,
   QuizSubmitDto,
   SaveProgressDto,
+  SubmissionFileUploadDto,
+  SubmissionFileUploadRequestDto,
 } from '../enrollments/dto/learning.dto';
 import { PlayerService } from './player.service';
 
@@ -54,6 +56,13 @@ export class PlayerController {
   @ZodResponse({ status: 201, type: QuizAttemptDto })
   quiz(@Param() p: ItemParamsDto, @Body() dto: QuizSubmitDto, @CurrentPrincipal() principal: Principal) {
     return this.player.submitQuiz(principal, p.enrollmentId, p.itemId, dto.answers);
+  }
+
+  @Post('files')
+  @ApiOperation({ summary: r.uploadFile.summary })
+  @ZodResponse({ status: 201, type: SubmissionFileUploadDto })
+  upload(@Param() p: ItemParamsDto, @Body() dto: SubmissionFileUploadRequestDto, @CurrentPrincipal() principal: Principal) {
+    return this.player.uploadFile(principal, p.enrollmentId, p.itemId, dto);
   }
 
   @Post('submissions')

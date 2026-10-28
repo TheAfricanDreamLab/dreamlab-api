@@ -1,4 +1,5 @@
 import { baseConfigSchema, booleanString } from '@lib/config';
+import { emailConfigShape } from '@lib/email';
 import { z } from 'zod';
 
 export const iamConfigSchema = baseConfigSchema.extend({
@@ -39,15 +40,8 @@ export const iamConfigSchema = baseConfigSchema.extend({
   /** Seed The African Dream Lab institution for local development. */
   SEED_DEMO_ORGS: booleanString.default('false'),
 
-  /**
-   * Email delivery. With no override, Resend is used when RESEND_API_KEY is set, otherwise
-   * ZeptoMail when ZEPTOMAIL_TOKEN is set, otherwise codes are only logged (development).
-   */
-  EMAIL_PROVIDER: z.enum(['resend', 'zeptomail', 'console']).optional(),
-  EMAIL_FROM: z.string().min(3).default('The African Dream Lab <no-reply@theafricandreamlab.com>'),
-  RESEND_API_KEY: z.string().min(10).optional(),
-  ZEPTOMAIL_TOKEN: z.string().min(10).optional(),
-  ZEPTOMAIL_API_URL: z.string().url().default('https://api.zeptomail.com/v1.1/email'),
+  /** Email delivery (codes and invitations); see @lib/email. */
+  ...emailConfigShape,
   /** Comma-separated Google OAuth client ids (web, Android, iOS) whose ID tokens are accepted. */
   GOOGLE_CLIENT_IDS: z
     .string()
@@ -94,9 +88,3 @@ export function smsProvider(config: Pick<IamConfig, 'SMS_PROVIDER' | 'TERMII_API
   return config.TERMII_API_KEY ? 'termii' : 'console';
 }
 
-export function emailProvider(config: Pick<IamConfig, 'EMAIL_PROVIDER' | 'RESEND_API_KEY' | 'ZEPTOMAIL_TOKEN'>): 'resend' | 'zeptomail' | 'console' {
-  if (config.EMAIL_PROVIDER) return config.EMAIL_PROVIDER;
-  if (config.RESEND_API_KEY) return 'resend';
-  if (config.ZEPTOMAIL_TOKEN) return 'zeptomail';
-  return 'console';
-}

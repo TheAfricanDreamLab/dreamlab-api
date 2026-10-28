@@ -25,10 +25,12 @@
       "@lib/common": ["libs/common/src"],
       "@lib/config": ["libs/config/src"],
       "@lib/database": ["libs/database/src"],
+      "@lib/email": ["libs/email/src"],
       "@lib/health": ["libs/health/src"],
       "@lib/logger": ["libs/logger/src"],
       "@lib/messaging": ["libs/messaging/src"],
       "@lib/rpc": ["libs/rpc/src"],
+      "@lib/storage": ["libs/storage/src"],
       "@lib/testing": ["libs/testing/src"]
     }
   },

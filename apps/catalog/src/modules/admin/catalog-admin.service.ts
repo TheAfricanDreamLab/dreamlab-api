@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ProgramAuthoring } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
@@ -7,7 +8,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { CatalogDatabase, schema } from '../../database';
 import { CatalogEvents } from '../../events';
 
-const { courses, courseVersions, catalogListings } = schema;
+const { courses, courseVersions, catalogListings, programs, programPhases, programCourses, electiveGroups, capstoneStageDefs, graduationRequirements, programCalendarWeeks } = schema;
 
 /** Platform administration of the catalog (PLT-1): what is listed and what is featured. */
 @Injectable()
@@ -45,6 +46,51 @@ export class CatalogAdminService {
     });
     const [item] = await this.toAdmin([courseId]);
     return item!;
+  }
+
+  /** The programme as its authored file: what importProgram takes, so an edit round-trips unchanged. */
+  async exportProgram(slug: string): Promise<ProgramAuthoring> {
+    const [program] = await this.db.sys.select().from(programs).where(eq(programs.slug, slug));
+    if (!program) throw notFound('program_not_found', 'Programme not found');
+    const [phases, links, groups, stages, requirements, weeks] = await Promise.all([
+      this.db.sys.select().from(programPhases).where(eq(programPhases.programId, program.id)).orderBy(asc(programPhases.position)),
+      this.db.sys
+        .select({ phaseId: programCourses.phaseId, slug: courses.slug, creditHours: programCourses.creditHours, required: programCourses.isRequired })
+        .from(programCourses)
+        .innerJoin(courses, eq(courses.id, programCourses.courseId))
+        .where(eq(programCourses.programId, program.id))
+        .orderBy(asc(programCourses.position)),
+      this.db.sys.select().from(electiveGroups).where(eq(electiveGroups.programId, program.id)),
+      this.db.sys.select().from(capstoneStageDefs).where(eq(capstoneStageDefs.programId, program.id)).orderBy(asc(capstoneStageDefs.position)),
+      this.db.sys.select().from(graduationRequirements).where(eq(graduationRequirements.programId, program.id)).orderBy(asc(graduationRequirements.position)),
+      this.db.sys.select().from(programCalendarWeeks).where(eq(programCalendarWeeks.programId, program.id)).orderBy(asc(programCalendarWeeks.weekNo)),
+    ]);
+    const phaseName = new Map(phases.map((ph) => [ph.id, ph.name]));
+    const chooseN = new Map(groups.map((g) => [g.phaseId, g.chooseN]));
+    return {
+      slug: program.slug,
+      title: program.title,
+      subtitle: program.subtitle,
+      description: program.description,
+      provider: program.provider,
+      programType: program.programType,
+      deliveryMode: program.deliveryMode,
+      features: program.features,
+      cover: program.cover,
+      phases: phases.map((ph) => ({
+        key: ph.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `phase-${ph.position}`,
+        name: ph.name,
+        summary: ph.summary,
+        weekFrom: ph.weekFrom,
+        weekTo: ph.weekTo,
+        weightPct: ph.weightPct,
+        chooseN: chooseN.get(ph.id) ?? null,
+        courses: links.filter((l) => l.phaseId === ph.id).map((l) => ({ slug: l.slug, creditHours: l.creditHours, required: l.required })),
+      })),
+      capstoneStages: stages.map((st) => ({ name: st.name, outputDocument: st.outputDocument, creditHours: st.creditHours, summary: st.summary })),
+      graduationRequirements: requirements.map((r) => ({ key: r.key, label: r.label })),
+      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput })),
+    };
   }
 
   private async toAdmin(ids: string[]) {

@@ -13,6 +13,7 @@ import {
   ImportProgramDto,
   ImportResultDto,
   ProgramImportResultDto,
+  SlugParamsDto,
   UpdateAdminCourseDto,
 } from '../courses/dto/catalog.dto';
 import { CatalogSeedService } from '../seed/catalog-seed.service';
@@ -57,6 +58,14 @@ export class CatalogAdminController {
   @ZodResponse({ status: 200, type: ImportResultDto })
   async importCourse(@Body() dto: ImportCourseDto, @CurrentPrincipal() principal: Principal) {
     return this.importer.importCourse(dto, await this.owner(principal));
+  }
+
+  @Get('programs/:slug')
+  @RequirePermission('platform.catalog.manage')
+  @ApiOperation({ summary: r.adminExportProgram.summary })
+  @ZodResponse({ status: 200, type: ImportProgramDto })
+  exportProgram(@Param() p: SlugParamsDto) {
+    return this.admin.exportProgram(p.slug);
   }
 
   @Post('programs/import')

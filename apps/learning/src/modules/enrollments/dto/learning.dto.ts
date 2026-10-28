@@ -17,6 +17,9 @@ import {
   QuizAttemptSchema,
   QuizSubmitRequestSchema,
   SaveProgressRequestSchema,
+  SubmissionFileUploadRequestSchema,
+  SubmissionFileUploadSchema,
+  FileLinkSchema,
   UuidSchema,
 } from '@dreamlab/contracts';
 import { createZodDto } from 'nestjs-zod';
@@ -41,3 +44,7 @@ export class DiscussionPostDto extends createZodDto(DiscussionPostRequestSchema)
 export class DiscussionDto extends createZodDto(DiscussionSchema) {}
 export class JournalDto extends createZodDto(z.object({ items: z.array(JournalEntrySchema) })) {}
 export class LearningStatsDto extends createZodDto(LearningStatsSchema) {}
+export class SubmissionFileUploadRequestDto extends createZodDto(SubmissionFileUploadRequestSchema) {}
+export class SubmissionFileUploadDto extends createZodDto(SubmissionFileUploadSchema) {}
+export class FileLinkDto extends createZodDto(FileLinkSchema) {}
+export class FileParamsDto extends createZodDto(z.object({ fileId: UuidSchema })) {}

@@ -47,7 +47,17 @@ services:
       timeout: 5s
       retries: 30
 
+  # Azure Blob Storage emulator: course media and learners' files (MEDIA-1).
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--location", "/data", "--skipApiVersionCheck", "--loose"]
+    ports:
+      - "10000:10000"
+    volumes:
+      - azurite-data:/data
+
 volumes:
+  azurite-data:
   postgres-data:
   redis-data:
   rabbitmq-data:

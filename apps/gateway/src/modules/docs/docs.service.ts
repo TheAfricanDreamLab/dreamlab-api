@@ -40,6 +40,7 @@ export class DocsService implements OnModuleDestroy {
       { name: 'iam', url: this.config.IAM_URL },
       { name: 'catalog', url: this.config.CATALOG_URL },
       { name: 'learning', url: this.config.LEARNING_URL },
+      { name: 'notify', url: this.config.NOTIFY_URL },
     ];
     let merged: OpenAPIObject = structuredClone(this.own);
     for (const upstream of upstreams) {

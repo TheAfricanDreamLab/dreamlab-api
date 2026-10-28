@@ -5,11 +5,12 @@ import { conflict, notFound } from '@lib/common';
 import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
+import type { UserContact } from '@lib/rpc';
 import { and, desc, eq, gt, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { IamConfig } from '../../config';
 import { IamDatabase, schema } from '../../database';
 import { IamEvents } from '../../events';
-import { AuthzService } from '../authz/authz.service';
+import { activeAssignment, AuthzService } from '../authz/authz.service';
 import { SessionsService } from '../auth/services/sessions.service';
 
 const { users, userIdentities, sessions, memberships, organizations, roleAssignments, roles } = schema;
@@ -133,6 +134,41 @@ export class PlatformService {
     if (userIds.length === 0) return [];
     const rows = await this.db.sys.select({ id: users.id, name: users.fullName }).from(users).where(inArray(users.id, userIds.slice(0, 500)));
     return rows;
+  }
+
+  /**
+   * Where to reach people for notifications: the verified email of each active user, nothing else.
+   * Unverified or missing addresses come back null, so mail never goes to an address nobody proved.
+   */
+  async contacts(userIds: string[]): Promise<UserContact[]> {
+    if (userIds.length === 0) return [];
+    const rows = await this.db.sys
+      .select({ id: users.id, name: users.fullName, email: users.email, verified: users.emailVerifiedAt, locale: users.locale })
+      .from(users)
+      .where(and(inArray(users.id, userIds.slice(0, 500)), eq(users.status, 'active')));
+    return rows.map((r) => ({ id: r.id, name: r.name, email: r.verified ? r.email : null, locale: r.locale }));
+  }
+
+  /** Active members of an organisation holding a permission through an org-wide role in force now. */
+  async holders(orgId: string, permission: string): Promise<string[]> {
+    const rows = await this.db.sys
+      .selectDistinct({ userId: memberships.userId })
+      .from(roleAssignments)
+      .innerJoin(memberships, eq(memberships.id, roleAssignments.membershipId))
+      .innerJoin(roles, eq(roles.id, roleAssignments.roleId))
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(
+        and(
+          eq(memberships.orgId, orgId),
+          eq(memberships.status, 'active'),
+          eq(users.status, 'active'),
+          eq(roleAssignments.scopeType, 'org'),
+          sql`${permission} = any(${roles.permissions})`,
+          activeAssignment(),
+        ),
+      )
+      .limit(500);
+    return rows.map((r) => r.userId);
   }
 
   private async toPlatformUsers(rows: UserRow[]): Promise<PlatformUser[]> {

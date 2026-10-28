@@ -4,7 +4,7 @@ import { apiV1Contract } from '@dreamlab/contracts';
 import { Authenticated, CurrentPrincipal, Principal } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { AuthoringService } from './authoring.service';
-import { AuthoringOverviewDto, CreateDraftDto, DraftDto, DraftParamsDto, EmptyBodyDto, RequestChangesDto, ReviewNoteDto, SaveDraftDto } from './dto/authoring.dto';
+import { AuthoringOverviewDto, CourseMediaUploadDto, CourseMediaUploadRequestDto, CreateDraftDto, DraftDto, DraftParamsDto, EmptyBodyDto, RequestChangesDto, ReviewNoteDto, SaveDraftDto } from './dto/authoring.dto';
 
 const r = apiV1Contract.authoring;
 
@@ -80,6 +80,14 @@ export class AuthoringController {
   @ZodResponse({ status: 200, type: DraftDto })
   publish(@Param() p: DraftParamsDto, @Body() dto: ReviewNoteDto, @CurrentPrincipal() principal: Principal) {
     return this.authoring.publish(principal, p.draftId, dto.note);
+  }
+
+  @Post('drafts/:draftId/media')
+  @Authenticated()
+  @ApiOperation({ summary: r.uploadMedia.summary })
+  @ZodResponse({ status: 201, type: CourseMediaUploadDto })
+  uploadMedia(@Param() p: DraftParamsDto, @Body() dto: CourseMediaUploadRequestDto, @CurrentPrincipal() principal: Principal) {
+    return this.authoring.uploadMedia(principal, p.draftId, dto);
   }
 
   @Delete('drafts/:draftId')

@@ -1,4 +1,4 @@
-import { postJson } from './post-json';
+import { postJson } from '@lib/email';
 import type { SmsMessage, SmsSender } from './sms-sender.interface';
 
 /**

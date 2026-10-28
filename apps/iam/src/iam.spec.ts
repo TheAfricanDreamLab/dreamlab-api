@@ -1,12 +1,9 @@
 import { AppException, toErrorResponse } from '@lib/common';
 import { idToLabel, labelToId } from '@lib/database';
-import { emailProvider } from './config';
 import { isAncestorOrSelf } from './modules/authz/utils/unit-path';
-import { ZeptoMailEmailSender } from './modules/notifications/providers/zeptomail.email-sender';
+import { emailProvider, escapeHtml, parseFrom, ZeptoMailEmailSender } from '@lib/email';
 import { channelFor } from './modules/notifications/utils/channel-for';
-import { escapeHtml } from './modules/notifications/utils/escape-html';
 import { maskDestination } from './modules/notifications/utils/mask-destination';
-import { parseFrom } from './modules/notifications/utils/parse-from';
 import { pickSlug, slugify } from './modules/organizations/utils/slug';
 
 describe('org unit paths', () => {

@@ -6,11 +6,13 @@ import { createHttpApp, installGatewayTrust, setupSwagger } from '@lib/common';
 import { loadConfig, loadDotEnv, swaggerEnabled, trustProxySetting } from '@lib/config';
 import { runMigrations } from '@lib/database';
 import { CATALOG_RPC_QUEUE } from '@lib/rpc';
+import type { BlobStorage } from '@lib/storage';
 import { CatalogAppModule } from './app.module';
 import { catalogProductionSchema } from './config';
 import { catalogMigrationsFolder } from './database';
 import { CatalogSeedService } from './modules/seed/catalog-seed.service';
 import { DATASETS } from './modules/seed/datasets';
+import { STORAGE } from './modules/authoring/authoring.service';
 
 async function bootstrap(): Promise<void> {
   loadDotEnv();
@@ -42,6 +44,14 @@ async function bootstrap(): Promise<void> {
     });
   }
   await app.listen({ port: config.CATALOG_PORT, host: '0.0.0.0' });
+
+  // Development: Azurite needs its containers, and CORS so the browser can upload.
+  if (config.NODE_ENV === 'development') {
+    await app
+      .get<BlobStorage>(STORAGE)
+      .prepareForDevelopment()
+      .catch((err: unknown) => new Logger('Storage').warn(`Azurite not prepared: ${err instanceof Error ? err.message : String(err)}`));
+  }
 
   // After listening, so a slow or unavailable IAM never blocks the catalog from serving.
   if (config.CATALOG_SEED) {
