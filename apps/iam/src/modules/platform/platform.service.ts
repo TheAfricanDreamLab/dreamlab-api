@@ -13,7 +13,7 @@ import { IamEvents } from '../../events';
 import { activeAssignment, AuthzService } from '../authz/authz.service';
 import { SessionsService } from '../auth/services/sessions.service';
 
-const { users, userIdentities, sessions, memberships, organizations, roleAssignments, roles } = schema;
+const { users, userIdentities, sessions, memberships, organizations, roleAssignments, roles, groupMembers } = schema;
 type UserRow = typeof users.$inferSelect;
 
 /** Platform administration (PLT-1): people and organisations across every tenant. */
@@ -147,6 +147,30 @@ export class PlatformService {
       .from(users)
       .where(and(inArray(users.id, userIds.slice(0, 500)), eq(users.status, 'active')));
     return rows.map((r) => ({ id: r.id, name: r.name, email: r.verified ? r.email : null, locale: r.locale }));
+  }
+
+  /** Of these people, those who are active members of the organisation (assigned learning). */
+  async activeMembers(orgId: string, userIds: string[]): Promise<string[]> {
+    if (userIds.length === 0) return [];
+    const rows = await this.db.sys
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(and(eq(memberships.orgId, orgId), eq(memberships.status, 'active'), eq(users.status, 'active'), inArray(memberships.userId, userIds)));
+    return rows.map((r) => r.userId);
+  }
+
+  /** Active members in any of these groups of the organisation (assigned learning). */
+  async groupMembers(orgId: string, groupIds: string[]): Promise<string[]> {
+    if (groupIds.length === 0) return [];
+    const rows = await this.db.sys
+      .selectDistinct({ userId: memberships.userId })
+      .from(groupMembers)
+      .innerJoin(memberships, eq(memberships.id, groupMembers.membershipId))
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(and(eq(groupMembers.orgId, orgId), inArray(groupMembers.groupId, groupIds), eq(memberships.orgId, orgId), eq(memberships.status, 'active'), eq(users.status, 'active')))
+      .limit(2000);
+    return rows.map((r) => r.userId);
   }
 
   /** Active members of an organisation holding a permission through an org-wide role in force now. */
