@@ -58,9 +58,27 @@ export function toReleasedGrade(g: GradeRow): ReleasedGrade {
   return { scorePct: Math.round(g.score), rubricScores: g.rubricScores, feedback: g.feedback, releasedAt: g.releasedAt!.toISOString() };
 }
 
+/** A course or residency stage counts towards credits earned once its score reaches this. */
+export const PASS_MARK = 50;
+
 /**
- * The Programme Score: course final scores weighted by credit hours, over the courses that have one
- * (ERD §9: program_courses.credit_hours × course scores). Null until a course has a final score.
+ * The Dream Residency's stages as Programme Score items (Plan §3: 45 credits split 5/5/7/10/6/5/7):
+ * each stage weighs its credit hours and is scored once faculty approve it.
+ */
+export function residencyItems(stages: Array<{ position: number; creditHours: number }>, approved: Map<number, number>) {
+  return stages.map((s) => ({ credits: s.creditHours, score: approved.get(s.position) ?? null }));
+}
+
+/** Credits earned: courses whose final score reaches the pass mark, and approved residency stages. */
+export function creditsEarned(courses: Array<{ credits: number; score: number | null }>, stages: Array<{ credits: number; score: number | null }>): number {
+  const passed = courses.filter((c) => c.score !== null && c.score >= PASS_MARK).reduce((n, c) => n + c.credits, 0);
+  const approved = stages.filter((s) => s.score !== null).reduce((n, s) => n + s.credits, 0);
+  return Math.round((passed + approved) * 10) / 10;
+}
+
+/**
+ * The Programme Score: course final scores and approved residency stages, weighted by credit hours,
+ * over those that have a score (ERD §9: credit_hours × scores). Null until one has a score.
  */
 export function programmeScore(courses: Array<{ credits: number; score: number | null }>) {
   const scored = courses.filter((c) => c.score !== null);

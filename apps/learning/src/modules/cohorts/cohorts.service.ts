@@ -21,7 +21,7 @@ import { CatalogClient, IamRpc, RpcClient, UserName } from "@lib/rpc";
 import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { LearningDatabase, schema } from "../../database";
 import { CATALOG } from "../enrollments/enrollments.service";
-import { programmeScore } from "../grading/course-score";
+import { programmeScore, residencyItems } from "../grading/course-score";
 import { IAM_NAMES } from "../player/player.service";
 import {
   addDays,
@@ -40,6 +40,7 @@ const {
   programEnrollments,
   attendance,
   courseEnrollments,
+  residencyStages,
 } = schema;
 export type CohortRow = typeof cohorts.$inferSelect;
 type WeekRow = typeof calendarWeeks.$inferSelect;
@@ -389,7 +390,7 @@ export class CohortsService {
       .orderBy(asc(programEnrollments.enrolledAt));
     if (learners.length === 0) return { items: [] };
     const ids = learners.map((l) => l.id);
-    const [held, attended, progress, scores, names] = await Promise.all([
+    const [held, attended, progress, scores, names, program, stages] = await Promise.all([
       this.heldCount(cohort.id),
       this.db.sys
         .select({
@@ -422,6 +423,11 @@ export class CohortsService {
         .innerJoin(courseRuns, eq(courseRuns.id, courseEnrollments.courseRunId))
         .where(inArray(courseEnrollments.programEnrollmentId, ids)),
       this.userNames(learners.map((l) => l.userId)),
+      this.catalog.program(cohort.programSlug).catch(() => null),
+      this.db.sys
+        .select({ e: residencyStages.programEnrollmentId, position: residencyStages.position, score: residencyStages.scorePct })
+        .from(residencyStages)
+        .where(and(inArray(residencyStages.programEnrollmentId, ids), eq(residencyStages.status, "approved"))),
     ]);
     const attendedBy = new Map(attended.map((r) => [r.e, r.n]));
     const progressBy = new Map(progress.map((r) => [r.e, r.pct]));
@@ -436,11 +442,16 @@ export class CohortsService {
             ? Math.round(((attendedBy.get(l.id) ?? 0) / held) * 100)
             : null,
         progressPct: progressBy.get(l.id) ?? 0,
-        programmeScore: programmeScore(
-          scores
+        programmeScore: programmeScore([
+          ...scores
             .filter((s) => s.e === l.id)
             .map((s) => ({ credits: s.credits, score: s.score })),
-        ).programmeScore,
+          // Approved Dream Residency stages count with their credit hours.
+          ...residencyItems(
+            program?.capstoneStages ?? [],
+            new Map(stages.filter((s) => s.e === l.id).map((s) => [s.position, s.score!])),
+          ),
+        ]).programmeScore,
       })),
     };
   }
@@ -621,6 +632,25 @@ export class CohortsService {
       );
     }
     return { cohort, session };
+  }
+
+  /** Runs the cohort: cohort.manage in its host organisation (platform admins too). */
+  async isCohortManager(p: Principal, cohort: CohortRow): Promise<boolean> {
+    if (p.platformAdmin && !p.stale) return true;
+    return cohort.hostOrgId === p.orgId && this.may(p, cohort.hostOrgId, "cohort.manage");
+  }
+
+  /**
+   * The cohort's faculty: its managers, its teachers, and the host organisation's graders. They
+   * review residency work and confirm graduation requirements (Slice 3).
+   */
+  async isCohortFaculty(p: Principal, cohort: CohortRow): Promise<boolean> {
+    if (await this.isCohortManager(p, cohort)) return true;
+    if (cohort.hostOrgId !== p.orgId) return false;
+    return (
+      (await this.may(p, cohort.hostOrgId, "submission.grade")) ||
+      (await this.may(p, cohort.hostOrgId, "course_run.teach", "cohort", cohort.id))
+    );
   }
 
   /** Org-wide from the token's roles when they can be trusted; otherwise (or at a narrower scope) IAM decides. */
