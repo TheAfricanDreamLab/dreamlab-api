@@ -82,6 +82,22 @@
           }
         ]
       }
+    },
+    "admissions": {
+      "type": "application",
+      "root": "apps/admissions",
+      "entryFile": "main",
+      "sourceRoot": "apps/admissions/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/admissions/tsconfig.app.json",
+        "assets": [
+          {
+            "include": "database/migrations/**/*",
+            "outDir": "dist/apps/admissions",
+            "watchAssets": true
+          }
+        ]
+      }
     }
   }
 }

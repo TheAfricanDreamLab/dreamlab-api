@@ -56,6 +56,20 @@ services:
     volumes:
       - azurite-data:/data
 
+  # Live classes (LIVE-1): signalling on 7880, media on 7881/tcp and 7882/udp. Webhooks reach the
+  # learning service on the host (docker/livekit/livekit.yaml).
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   azurite-data:
   postgres-data:

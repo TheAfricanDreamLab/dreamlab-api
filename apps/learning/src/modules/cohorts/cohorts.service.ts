@@ -571,7 +571,7 @@ export class CohortsService {
   }
 
   /** Attendance is taken by cohort managers and by anyone who teaches in the cohort or the session's course run. */
-  private async teachingSession(
+  async teachingSession(
     p: Principal,
     cohortId: string,
     sessionId: string,

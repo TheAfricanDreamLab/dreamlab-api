@@ -35,10 +35,10 @@ export class GatewayAppModule {
           useFactory: (redis: Redis, rabbit: RabbitConnection) => [
             { name: 'redis', check: () => redis.ping() },
             { name: 'rabbitmq', check: async () => { if (!rabbit.isConnected()) throw new Error('not connected'); } },
-            ...(['iam', 'catalog', 'learning', 'notify'] as const).map((name) => ({
+            ...(['iam', 'catalog', 'learning', 'notify', 'admissions'] as const).map((name) => ({
               name,
               check: async () => {
-                const base = { iam: config.IAM_URL, catalog: config.CATALOG_URL, learning: config.LEARNING_URL, notify: config.NOTIFY_URL }[name];
+                const base = { iam: config.IAM_URL, catalog: config.CATALOG_URL, learning: config.LEARNING_URL, notify: config.NOTIFY_URL, admissions: config.ADMISSIONS_URL }[name];
                 const res = await fetch(new URL('/health', base), { signal: AbortSignal.timeout(2500) });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
               },

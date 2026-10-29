@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
+import type { FastifyInstance } from 'fastify';
 import { Logger } from 'nestjs-pino';
 import { cleanupOpenApiDoc } from 'nestjs-zod';
 import { newId } from './ids';
@@ -34,6 +35,7 @@ export async function createHttpApp(module: unknown, options: HttpAppOptions): P
       done(err as Error, undefined);
     }
   });
+  installWebhookBodyParser(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(module as never, adapter, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.enableShutdownHooks();
@@ -53,6 +55,11 @@ export async function createHttpApp(module: unknown, options: HttpAppOptions): P
       if (options.hsts) void reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     });
   return app;
+}
+
+/** Meeting-provider webhooks are signed over the exact body: keep application/webhook+json as the raw string. */
+export function installWebhookBodyParser(fastify: FastifyInstance): void {
+  fastify.addContentTypeParser(['application/webhook+json'], { parseAs: 'string' }, (_req, body, done) => done(null, body));
 }
 
 export interface SwaggerOptions {

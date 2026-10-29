@@ -12,6 +12,7 @@ import { DATABASE, DatabaseService } from '@lib/database';
 import { OutboxRelay, OutboxWriter, RelayOptions } from './outbox';
 import { RabbitConnection } from './rabbit';
 
+export * from './admissions';
 export * from './envelope';
 export * from './notifications';
 export * from './outbox';

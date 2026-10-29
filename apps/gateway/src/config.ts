@@ -17,6 +17,8 @@ export const gatewayConfigSchema = baseConfigSchema.extend({
   LEARNING_URL: z.string().url(),
   /** In-app notifications and email preferences (/v1/notifications/*). */
   NOTIFY_URL: z.string().url(),
+  /** Admission cycles and applications (/v1/admissions/*). */
+  ADMISSIONS_URL: z.string().url(),
   /** Hosts that mean "no tenant". `<slug>.<base>` resolves to that organisation. */
   GATEWAY_BASE_DOMAINS: csv,
   /** Lets the X-Tenant header choose the tenant. Development and testing only. */

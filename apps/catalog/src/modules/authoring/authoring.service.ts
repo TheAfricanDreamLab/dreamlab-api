@@ -283,7 +283,7 @@ export class AuthoringService {
   // ---------- access ----------
 
   /** The organisation the caller authors for: the active one, or the platform's for platform admins with none. */
-  private async homeOrg(p: Principal): Promise<string> {
+  async homeOrg(p: Principal): Promise<string> {
     if (p.orgId) return p.orgId;
     if (p.platformAdmin) return this.platformOrg();
     throw forbidden('org_context_required', 'Switch to the organisation whose courses you write.');
@@ -307,6 +307,16 @@ export class AuthoringService {
     const allowed = this.platformReviewer(p, draft) || (await this.canEdit(p, draft)) || (await this.may(p, draft.ownerOrgId, 'course.publish'));
     if (!allowed) throw notFound('draft_not_found', 'Draft not found');
     return draft;
+  }
+
+  /** May the caller author content for the organisation as a whole (course.content.edit org-wide)? */
+  async isOrgAuthor(p: Principal, orgId: string): Promise<boolean> {
+    return this.may(p, orgId, 'course.content.edit');
+  }
+
+  /** May the caller change this course: an organisation author, or an author of this course. */
+  async canEditCourse(p: Principal, ownerOrgId: string, courseId: string): Promise<boolean> {
+    return (await this.may(p, ownerOrgId, 'course.content.edit')) || (await this.mayCourse(p, ownerOrgId, courseId));
   }
 
   /** Authors of the whole organisation, or of this course (the author role scoped to it). */

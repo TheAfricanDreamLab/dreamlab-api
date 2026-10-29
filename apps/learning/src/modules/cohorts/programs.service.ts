@@ -3,7 +3,7 @@ import type { Cohort, MyProgram, ProgramDetail } from '@dreamlab/contracts';
 import { hasOrgPermission, type Principal } from '@lib/auth';
 import { badRequest, conflict, forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
-import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
+import { type ApplicantAdmitted, InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { CatalogClient } from '@lib/rpc';
 import { and, asc, eq, gt, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
@@ -64,45 +64,62 @@ export class ProgramsService {
       throw forbidden('org_context_required', `Switch to ${cohort.hostOrgName} to join this cohort.`);
     }
 
-    const enrollmentId = await this.db.tenant(hostCtx(p, cohort), async (tx) => {
-      // Locks the cohort first, so concurrent joins (the same person twice, or two people for the
-      // last place) run one after the other and each sees what the other committed.
-      const [locked] = await tx.select().from(cohorts).where(eq(cohorts.id, cohort.id)).for('update');
-      const [existing] = await tx
-        .select()
-        .from(programEnrollments)
-        .where(and(eq(programEnrollments.cohortId, cohort.id), eq(programEnrollments.userId, p.userId)));
-      if (existing && existing.status !== 'withdrawn') return existing.id;
+    const enrollmentId = await this.db.tenant(hostCtx(p, cohort), (tx) => this.enrol(tx, p.userId, cohort, { requestId }));
+    return this.myProgram(p, enrollmentId);
+  }
 
+  /**
+   * Admissions admitted this person to the cohort (ADM-1): enrol them past its enrolment policy and
+   * capacity, which admission replaces. Only into a cohort the admitting organisation hosts, for the
+   * programme they applied to.
+   */
+  async admit(tx: LearningTx, e: ApplicantAdmitted): Promise<'enrolled' | 'mismatch'> {
+    const [cohort] = await tx.select().from(cohorts).where(eq(cohorts.id, e.cohortId));
+    if (!cohort || cohort.hostOrgId !== e.orgId || cohort.programSlug !== e.programSlug) return 'mismatch';
+    await this.enrol(tx, e.userId, cohort, { admitted: true });
+    return 'enrolled';
+  }
+
+  /** Enrols in the programme and its required courses; an existing active enrolment is kept. */
+  private async enrol(tx: LearningTx, userId: string, cohort: CohortRow, opts: { requestId?: string; admitted?: boolean }): Promise<string> {
+    // Locks the cohort first, so concurrent joins (the same person twice, or two people for the
+    // last place) run one after the other and each sees what the other committed.
+    const [locked] = await tx.select().from(cohorts).where(eq(cohorts.id, cohort.id)).for('update');
+    const [existing] = await tx
+      .select()
+      .from(programEnrollments)
+      .where(and(eq(programEnrollments.cohortId, cohort.id), eq(programEnrollments.userId, userId)));
+    if (existing && existing.status !== 'withdrawn') return existing.id;
+
+    if (!opts.admitted) {
       if (!locked || !(JOINABLE as readonly string[]).includes(locked.status)) throw conflict('cohort_not_open', 'This cohort isn’t taking learners.');
       const learners = (await learnerCounts(this.db, [cohort.id])).get(cohort.id) ?? 0;
       if (locked.capacity !== null && learners >= locked.capacity) throw conflict('cohort_full', 'This cohort is full.');
+    }
 
-      const id = existing?.id ?? newId();
-      if (existing) {
-        await tx.update(programEnrollments).set({ status: 'active', enrolledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, id));
-      } else {
-        await tx.insert(programEnrollments).values({ id, userId: p.userId, programId: cohort.programId, programSlug: cohort.programSlug, cohortId: cohort.id, contextOrgId: cohort.hostOrgId });
-      }
-      const runs = await tx.select().from(courseRuns).where(and(eq(courseRuns.cohortId, cohort.id), eq(courseRuns.required, true)));
-      for (const run of runs) await this.enrolInRun(tx, p, cohort, id, run, requestId);
-      await requestNotification(
-        this.outbox,
-        tx,
-        {
-          to: { userIds: [p.userId] },
-          category: 'cohorts',
-          title: `Welcome to ${cohort.name}`,
-          body: `You have joined ${cohort.name}. Your programme calendar, courses and class sessions are ready.`,
-          link: '/app/programme',
-          orgId: cohort.hostOrgId,
-          key: `cohort-joined:${id}:${Date.now()}`,
-        },
-        userActor(p.userId),
-      );
-      return id;
-    });
-    return this.myProgram(p, enrollmentId);
+    const id = existing?.id ?? newId();
+    if (existing) {
+      await tx.update(programEnrollments).set({ status: 'active', enrolledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, id));
+    } else {
+      await tx.insert(programEnrollments).values({ id, userId, programId: cohort.programId, programSlug: cohort.programSlug, cohortId: cohort.id, contextOrgId: cohort.hostOrgId });
+    }
+    const runs = await tx.select().from(courseRuns).where(and(eq(courseRuns.cohortId, cohort.id), eq(courseRuns.required, true)));
+    for (const run of runs) await this.enrolInRun(tx, userId, cohort, id, run, opts.requestId);
+    await requestNotification(
+      this.outbox,
+      tx,
+      {
+        to: { userIds: [userId] },
+        category: 'cohorts',
+        title: `Welcome to ${cohort.name}`,
+        body: `You have joined ${cohort.name}. Your programme calendar, courses and class sessions are ready.`,
+        link: '/app/programme',
+        orgId: cohort.hostOrgId,
+        key: `cohort-joined:${id}:${Date.now()}`,
+      },
+      userActor(userId),
+    );
+    return id;
   }
 
   async myPrograms(p: Principal): Promise<{ items: MyProgram[] }> {
@@ -149,7 +166,7 @@ export class ProgramsService {
       await tx.insert(electiveSelections).values(
         runs.map((r) => ({ id: newId(), programEnrollmentId: enrollment.id, userId: p.userId, groupKey: group, courseId: r.courseId, courseSlug: r.courseSlug })),
       );
-      for (const run of runs) await this.enrolInRun(tx, p, cohort, enrollment.id, run, requestId);
+      for (const run of runs) await this.enrolInRun(tx, p.userId, cohort, enrollment.id, run, requestId);
       await this.dropUnopenedElectives(tx, p, enrollment.id, cohort.id, group, runs.map((r) => r.id));
     });
     return this.myProgram(p, enrollment.id);
@@ -198,11 +215,11 @@ export class ProgramsService {
   }
 
   /** A course enrolment for the run, or the learner's existing one in the same context, linked to the programme. */
-  private async enrolInRun(tx: LearningTx, p: Principal, cohort: CohortRow, programEnrollmentId: string, run: RunRow, requestId?: string) {
+  private async enrolInRun(tx: LearningTx, userId: string, cohort: CohortRow, programEnrollmentId: string, run: RunRow, requestId?: string) {
     const [existing] = await tx
       .select()
       .from(courseEnrollments)
-      .where(and(eq(courseEnrollments.userId, p.userId), eq(courseEnrollments.courseId, run.courseId), eq(courseEnrollments.contextOrgId, cohort.hostOrgId)));
+      .where(and(eq(courseEnrollments.userId, userId), eq(courseEnrollments.courseId, run.courseId), eq(courseEnrollments.contextOrgId, cohort.hostOrgId)));
     if (existing) {
       if (!existing.programEnrollmentId) {
         await tx.update(courseEnrollments).set({ courseRunId: run.id, programEnrollmentId, updatedAt: new Date() }).where(eq(courseEnrollments.id, existing.id));
@@ -216,7 +233,7 @@ export class ProgramsService {
       .insert(courseEnrollments)
       .values({
         id: newId(),
-        userId: p.userId,
+        userId: userId,
         courseId: run.courseId,
         courseSlug: run.courseSlug,
         courseVersionId: content.version.id,
@@ -232,9 +249,9 @@ export class ProgramsService {
     await this.outbox.add(tx, {
       type: LearningEvents.EnrollmentCreated,
       orgId: cohort.hostOrgId,
-      actor: userActor(p.userId),
+      actor: userActor(userId),
       requestId,
-      payload: { enrollmentId: row.id, userId: p.userId, courseId: row.courseId, versionId: row.courseVersionId, contextOrgId: cohort.hostOrgId, programEnrollmentId },
+      payload: { enrollmentId: row.id, userId: userId, courseId: row.courseId, versionId: row.courseVersionId, contextOrgId: cohort.hostOrgId, programEnrollmentId },
     });
   }
 
