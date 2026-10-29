@@ -5,6 +5,7 @@ import {
   AdmissionStageSchema,
   AdvanceRequestSchema,
   apiV1Contract,
+  ApplicantStageSchema,
   ApplicationSchema,
   ApplicationStatusSchema,
   ApplicationSummarySchema,
@@ -25,7 +26,7 @@ import { AdmissionsService } from './admissions.service';
 const r = apiV1Contract.admissions;
 
 class AppParamsDto extends createZodDto(z.object({ applicationId: UuidSchema })) {}
-class StageParamsDto extends createZodDto(z.object({ applicationId: UuidSchema, stage: AdmissionStageSchema })) {}
+class StageParamsDto extends createZodDto(z.object({ applicationId: UuidSchema, stage: ApplicantStageSchema })) {}
 class CycleParamsDto extends createZodDto(z.object({ cycleId: UuidSchema })) {}
 class OpenCyclesQueryDto extends createZodDto(z.object({ programSlug: z.string().max(80).optional() })) {}
 class PipelineQueryDto extends createZodDto(z.object({ stage: AdmissionStageSchema.optional(), status: ApplicationStatusSchema.optional() })) {}
