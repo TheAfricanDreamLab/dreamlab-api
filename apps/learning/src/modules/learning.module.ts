@@ -22,9 +22,12 @@ import { FilesService, STORAGE } from './files/files.service';
 import { CATALOG, EnrollmentsService } from './enrollments/enrollments.service';
 import { PlayerController } from './player/player.controller';
 import { IAM_NAMES, PlayerService } from './player/player.service';
+import { ASSIGNED_CONTROLLERS, ASSIGNED_PROVIDERS } from './assigned';
+import { OUTCOMES_CONTROLLERS, OUTCOMES_PROVIDERS } from './outcomes';
+import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
 
 @Module({
-  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController],
+  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController, ...OUTCOMES_CONTROLLERS, ...SCORES_CONTROLLERS, ...ASSIGNED_CONTROLLERS],
   providers: [
     EnrollmentsService,
     CohortsService,
@@ -41,6 +44,9 @@ import { IAM_NAMES, PlayerService } from './player/player.service';
     { provide: STORAGE, inject: [CONFIG], useFactory: (c: LearningConfig) => new BlobStorage(c) },
     { provide: CATALOG, inject: [CONFIG], useFactory: (c: LearningConfig) => new CatalogClient(new RpcClient(c.RABBITMQ_URL, CATALOG_RPC_QUEUE)) },
     { provide: IAM_NAMES, inject: [CONFIG], useFactory: (c: LearningConfig) => new RpcClient(c.RABBITMQ_URL, IAM_USERS_QUEUE, 3000) },
+    ...OUTCOMES_PROVIDERS,
+    ...SCORES_PROVIDERS,
+    ...ASSIGNED_PROVIDERS,
   ],
 })
 export class LearningModule {}
