@@ -82,6 +82,8 @@ export class InstructorsService {
       : [];
     if (owned.length !== ids.length) throw badRequest('instructor_not_found', 'Choose instructors from your organisation’s profiles.');
     await this.db.system(async (tx) => {
+      // Locks the course, so two authors saving its staff at once replace it one after the other.
+      await tx.select({ id: courses.id }).from(courses).where(eq(courses.id, course.id)).for('update');
       await tx.delete(courseStaff).where(eq(courseStaff.courseId, course.id));
       if (staff.length) await tx.insert(courseStaff).values(staff.map((s, i) => ({ courseId: course.id, profileId: s.profileId, ownerOrgId: course.ownerOrgId, role: s.role, position: i + 1 })));
     });

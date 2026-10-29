@@ -48,13 +48,14 @@ export class LiveService {
     const [cohort] = await this.db.sys.select().from(cohorts).where(eq(cohorts.id, cohortId));
     const [session] = cohort ? await this.db.sys.select().from(classSessions).where(and(eq(classSessions.id, sessionId), eq(classSessions.cohortId, cohort.id))) : [];
     if (!cohort || !session) throw notFound('session_not_found', 'Class session not found');
-    if (await this.isLearner(p.userId, cohort.id)) return { cohort, session, role: 'participant' };
     try {
       await this.cohortsService.teachingSession(p, cohortId, sessionId);
       return { cohort, session, role: 'host' };
     } catch {
-      throw notFound('session_not_found', 'Class session not found');
+      // Not staff of this class: its learners take part.
     }
+    if (await this.isLearner(p.userId, cohort.id)) return { cohort, session, role: 'participant' };
+    throw notFound('session_not_found', 'Class session not found');
   }
 
   private async isLearner(userId: string, cohortId: string): Promise<boolean> {
@@ -133,7 +134,10 @@ export class LiveService {
         .onConflictDoNothing()
         .returning({ id: meetingEvents.id }),
     );
-    if (inserted.length === 0 || !e.identity || !['participant_joined', 'participant_left'].includes(e.event)) return true;
+    // A redelivered event (already stored) derives again: derivation recomputes from every stored event,
+    // so a retry after a failed derivation repairs the register instead of being skipped.
+    if (inserted.length === 0) this.logger.debug(`Event ${e.eventId} redelivered`);
+    if (!e.identity || !['participant_joined', 'participant_left'].includes(e.event)) return true;
     const sessionPrefix = this.meet.roomName('session', '');
     if (e.roomName.startsWith(sessionPrefix)) await this.deriveAttendance(e.roomName.slice(sessionPrefix.length), e.identity);
     return true;

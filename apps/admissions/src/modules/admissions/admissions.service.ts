@@ -366,7 +366,8 @@ export class AdmissionsService {
   async get(p: Principal, applicationId: string): Promise<Application> {
     const [app] = await this.db.sys.select().from(applications).where(eq(applications.id, applicationId));
     if (!app) throw notFound('application_not_found', 'Application not found');
-    const staff = this.isStaff(p, app.orgId);
+    // Staff who applied themselves see their own application as an applicant does.
+    const staff = app.userId !== p.userId && this.isStaff(p, app.orgId);
     if (!staff && app.userId !== p.userId) throw notFound('application_not_found', 'Application not found');
     return this.view(p, app, staff);
   }

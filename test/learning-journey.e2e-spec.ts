@@ -1246,6 +1246,9 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     expect(meetKit.joins.at(-1)).toMatchObject({ role: 'participant', participantVideo: true });
     expect((await request(learning, 'POST', `/v1/learning/mentoring/meetings/${meetingId}/join`, { ...L(bayo), body: {} })).status).toBe(404);
     await notificationsFor(ada, (n) => n.category === 'community');
+    // Once the mentorship ends, its meetings can no longer be joined.
+    expect((await request(learning, 'DELETE', `/v1/learning/mentor-assignments/${assignmentId}`, L(owner))).status).toBe(204);
+    expect((await request(learning, 'POST', `/v1/learning/mentoring/meetings/${meetingId}/join`, { ...L(ada), body: {} })).status).toBe(404);
   });
 
   it('forms Dream Circles from the cohort’s learners', async () => {

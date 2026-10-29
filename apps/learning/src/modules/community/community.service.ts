@@ -271,7 +271,8 @@ export class CommunityService {
   async joinMeeting(p: Principal, meetingId: string, now = new Date()): Promise<JoinTicket> {
     const [m] = await this.db.sys.select().from(mentorMeetings).where(eq(mentorMeetings.id, meetingId));
     const [a] = m ? await this.db.sys.select().from(mentorAssignments).where(eq(mentorAssignments.id, m.assignmentId)) : [];
-    if (!m || !a || (a.mentorUserId !== p.userId && a.learnerUserId !== p.userId)) throw notFound('meeting_not_found', 'Meeting not found');
+    // An ended mentorship's meetings stay in the record but cannot be joined.
+    if (!m || !a || a.endedAt || (a.mentorUserId !== p.userId && a.learnerUserId !== p.userId)) throw notFound('meeting_not_found', 'Meeting not found');
     const names = await this.names([a.mentorUserId, a.learnerUserId]);
     const view = this.toMeeting(m, a, names, a.learnerUserId === p.userId, now);
     if (m.mode !== 'virtual') throw forbidden('not_virtual', 'This meeting is in person.');
