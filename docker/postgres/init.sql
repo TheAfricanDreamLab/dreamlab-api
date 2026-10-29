@@ -50,3 +50,15 @@ GRANT CONNECT ON DATABASE dreamlab_notify TO notify_app, notify_system;
 \connect dreamlab_notify
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 ALTER SCHEMA public OWNER TO notify_owner;
+
+\connect postgres
+CREATE ROLE admissions_owner LOGIN PASSWORD 'admissions_owner';
+CREATE ROLE admissions_app LOGIN PASSWORD 'admissions_app';
+CREATE ROLE admissions_system LOGIN PASSWORD 'admissions_system' BYPASSRLS;
+CREATE DATABASE dreamlab_admissions OWNER admissions_owner;
+REVOKE ALL ON DATABASE dreamlab_admissions FROM PUBLIC;
+GRANT CONNECT ON DATABASE dreamlab_admissions TO admissions_app, admissions_system;
+
+\connect dreamlab_admissions
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+ALTER SCHEMA public OWNER TO admissions_owner;

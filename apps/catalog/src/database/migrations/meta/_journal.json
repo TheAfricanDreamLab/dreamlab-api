@@ -36,6 +36,13 @@
       "when": 1793130631223,
       "tag": "0004_system_role_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793217015530,
+      "tag": "0005_instructors",
+      "breakpoints": true
     }
   ]
 }

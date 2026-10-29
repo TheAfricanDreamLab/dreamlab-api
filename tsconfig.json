@@ -28,6 +28,7 @@
       "@lib/email": ["libs/email/src"],
       "@lib/health": ["libs/health/src"],
       "@lib/logger": ["libs/logger/src"],
+      "@lib/meet-kit": ["libs/meet-kit/src"],
       "@lib/messaging": ["libs/messaging/src"],
       "@lib/rpc": ["libs/rpc/src"],
       "@lib/storage": ["libs/storage/src"],

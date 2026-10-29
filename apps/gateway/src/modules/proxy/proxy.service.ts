@@ -24,6 +24,8 @@ const CONTEXT_NEUTRAL = [
   // A learner's courses go with them, whichever organisation's site they are on.
   /^\/v1\/catalog\//,
   /^\/v1\/learning\//,
+  // Applying goes with the person too; running admissions (/v1/admissions/admin/…) does not.
+  /^\/v1\/admissions\/(cycles|applications)(\/|\?|$)/,
 ];
 
 /**

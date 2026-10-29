@@ -12,11 +12,16 @@ apps/
   iam/       identity and access: accounts, Google sign-in, OTP, sessions, tokens (EdDSA + JWKS),
              organisations, memberships, roles, org units, groups, invitations
   catalog/   courses, versions, programmes, the public catalogue, course authoring (drafts, review),
-             course media uploads
+             course media uploads, instructor profiles and course staff
   learning/  enrolments, the course player, submissions and files, cohorts, attendance, grading,
-             Programme Score, class-session reminders
+             Programme Score, class-session reminders, live classes (LiveKit rooms, recordings,
+             attendance from join/leave webhooks), mentorship and Dream Circles; enrols people
+             admissions admitted
   notify/    notifications: one per person (in the app), email by category preference; fed by
              `notification.requested` events from any service
+  admissions/ admission cycles and the ten-stage application pipeline: applicant stages, reviews
+             with DBPI/DSI, optional AI-assisted evaluations (Claude, stored immutably), interviews,
+             scholarships and human decisions; publishes `applicant.admitted`
 libs/
   auth/       token verification, global guards, @Public / @RequirePermission / @CurrentPrincipal, RPC authz client
   common/     error shape, Redis, rate limiter, ids, HTTP + Swagger bootstrap
@@ -25,6 +30,7 @@ libs/
   email/      email providers (Resend, ZeptoMail, console in development), shared by iam and notify
   health/     /health with dependency checks
   logger/     pino with request ids and redaction
+  meet-kit/   live rooms behind one interface (LiveKit adapter: self-hosted or LiveKit Cloud by settings)
   messaging/  RabbitMQ topology, outbox writer + relay, inbox (exactly-once effect), event envelope,
               requestNotification (ask notify to tell people something, in the caller's transaction)
   rpc/        RabbitMQ RPC patterns and clients between services (catalog content, IAM names, contacts,
@@ -68,12 +74,19 @@ pnpm dev                  # docker compose up + every service in watch mode
 | iam | 3001 | | Redis | 6379 |
 | catalog | 3002 | | RabbitMQ | 5672 (console 15672) |
 | learning | 3003 | | Azurite (Blob Storage) | 10000 |
-| notify | 3004 | | | |
+| notify | 3004 | | LiveKit (live classes) | 7880 (media 7881/tcp, 7882/udp) |
+| admissions | 3005 | | | |
 
 A database created before a service existed (for example `dreamlab_notify`) is not added by
 `docker/postgres/init.sql` to an existing volume: run that service's block of `init.sql` with
 `docker compose exec -T postgres psql -U postgres`, or recreate the volume. In development, catalog
 and learning create the Azurite containers and their CORS rule on boot.
+
+Live classes use the LiveKit server in `docker-compose.yml` (development keys in
+`docker/livekit/livekit.yaml`; its webhooks reach learning on the host at port 3003). Without the
+`LIVEKIT_*` settings, joining a class answers 503 and everything else works. AI-assisted admissions
+evaluations need `ANTHROPIC_API_KEY`; without it that one action answers 503 and reviews stay
+human-only.
 
 - API docs (all services): http://localhost:3000/docs
 - Health: http://localhost:3000/health
@@ -118,7 +131,7 @@ curl -s localhost:3000/v1/auth/verify -H 'content-type: application/json' -d '{"
 | `pnpm test:e2e` | End-to-end tests against real Postgres, Redis, RabbitMQ and Azurite (Testcontainers; Docker required) |
 | `pnpm iam:migrate` / `pnpm iam:seed` / `pnpm iam:rotate-keys` | IAM operations |
 | `pnpm iam:generate` | Generate a migration from schema changes |
-| `pnpm <svc>:migrate` / `pnpm <svc>:generate` | The same for catalog, learning and notify (`catalog:seed` loads test content) |
+| `pnpm <svc>:migrate` / `pnpm <svc>:generate` | The same for catalog, learning, notify and admissions (`catalog:seed` loads test content) |
 | `pnpm run license-check` | Fail on any dependency outside the licence allowlist |
 | `docker build --build-arg APP=iam .` | Production image for one service |
 

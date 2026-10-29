@@ -6,7 +6,7 @@ import { join } from 'node:path';
  * system role is not the table owner (it cannot be granted BYPASSRLS there), so without the policy
  * the system connection would see no rows of a new table. This test fails until the migration adds it.
  */
-const services = ['iam', 'catalog', 'learning', 'notify'];
+const services = ['iam', 'catalog', 'learning', 'notify', 'admissions'];
 
 describe.each(services.filter((svc) => readdirSync(join(__dirname, '../../../apps')).includes(svc)))('%s migrations', (svc) => {
   it('give the system role a policy on every RLS table', () => {

@@ -1,4 +1,5 @@
 import { baseConfigSchema, booleanString } from '@lib/config';
+import { meetKitConfigShape } from '@lib/meet-kit';
 import { storageConfigShape } from '@lib/storage';
 import { z } from 'zod';
 
@@ -16,6 +17,8 @@ export const learningConfigSchema = baseConfigSchema.extend({
   IAM_JWKS_URL: z.string().url(),
   /** Learners' assignment files (MEDIA-1). */
   ...storageConfigShape,
+  /** Live classes (LIVE-1): LiveKit, self-hosted or LiveKit Cloud. */
+  ...meetKitConfigShape,
 });
 
 export type LearningConfig = z.infer<typeof learningConfigSchema>;

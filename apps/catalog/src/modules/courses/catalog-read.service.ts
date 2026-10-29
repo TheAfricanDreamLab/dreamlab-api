@@ -7,7 +7,7 @@ import type { ContentItemRef, CourseContent } from '@lib/rpc';
 import { and, asc, eq, ilike, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
 import { CatalogDatabase, schema } from '../../database';
 
-const { courses, courseVersions, courseModules, contentItems, assessments, questions, assignmentSpecs, rubricCriteria, catalogListings, programs, programCourses } =
+const { courses, courseVersions, courseModules, contentItems, assessments, questions, assignmentSpecs, rubricCriteria, catalogListings, programs, programCourses, instructorProfiles, courseStaff } =
   schema;
 type CourseRow = typeof courses.$inferSelect;
 type VersionRow = typeof courseVersions.$inferSelect;
@@ -69,12 +69,23 @@ export class CatalogReadService {
       outcomes: row.outcomes,
       audience: row.audience,
       prerequisites: row.prerequisites,
-      instructors: row.instructors,
+      instructors: (await this.staffFor(row.id)) ?? row.instructors,
       trailer: row.trailer ?? null,
       versionId: version?.id ?? null,
       versionNo: version?.versionNo ?? null,
       modules,
     };
+  }
+
+  /** The course's staff (INSTR-1), in order, or null when none are set. */
+  private async staffFor(courseId: string): Promise<CourseDetail['instructors'] | null> {
+    const rows = await this.db.sys
+      .select({ p: instructorProfiles, role: courseStaff.role })
+      .from(courseStaff)
+      .innerJoin(instructorProfiles, eq(instructorProfiles.id, courseStaff.profileId))
+      .where(eq(courseStaff.courseId, courseId))
+      .orderBy(asc(courseStaff.position));
+    return rows.length ? rows.map(({ p, role }) => ({ name: p.name, title: p.title, bio: p.bio, photoUrl: p.photoUrl, role })) : null;
   }
 
   /** Course content for the learning service, answers included. */

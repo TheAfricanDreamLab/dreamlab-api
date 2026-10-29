@@ -17,4 +17,5 @@ export * from '../modules/programs/entities/graduation-requirement.entity';
 export * from '../modules/programs/entities/capstone-stage-def.entity';
 export * from '../modules/programs/entities/program-calendar-week.entity';
 export * from '../modules/authoring/entities/course-draft.entity';
+export * from '../modules/instructors/entities/instructor-profile.entity';
 export { inbox, outbox } from '@lib/messaging';

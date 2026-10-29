@@ -1,0 +1,14 @@
+# Local LiveKit for live classes (LIVE-1). Development keys only; production keys live in Key Vault.
+port: 7880
+log_level: info
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+  node_ip: 127.0.0.1
+keys:
+  devkey: dreamlab-local-livekit-secret-0001
+webhook:
+  api_key: devkey
+  urls:
+    - http://host.docker.internal:3003/v1/learning/meetings/webhook

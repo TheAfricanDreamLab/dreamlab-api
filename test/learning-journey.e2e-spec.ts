@@ -7,8 +7,12 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { isAppRoute, type AppRoute, type AppRouter } from '@ts-rest/core';
+import { AccessToken } from 'livekit-server-sdk';
+import { createHash } from 'node:crypto';
 import {
+  AdmissionCycle,
   apiV1Contract,
+  Application,
   BlockAuthoring,
   BlockResponse,
   CohortDetail,
@@ -19,17 +23,19 @@ import {
   ItemAuthoring,
   ItemView,
   isInteractiveBlock,
+  MyCommunity,
   MyProgram,
   Notification,
   SubmissionFileUpload,
   SubmissionForGrading,
 } from '@dreamlab/contracts';
 import { IAM_RPC_QUEUE } from '@lib/auth';
-import { buildOpenApiDocument, installGatewayTrust, REDIS } from '@lib/common';
+import { buildOpenApiDocument, installGatewayTrust, installWebhookBodyParser, REDIS } from '@lib/common';
 import { loadConfig } from '@lib/config';
-import { runMigrations } from '@lib/database';
+import { DATABASE, DatabaseService, runMigrations } from '@lib/database';
 import { CATALOG_RPC_QUEUE } from '@lib/rpc';
 import type { EmailMessage, EmailSender } from '@lib/email';
+import { type LiveRole, MeetKit } from '@lib/meet-kit';
 import type { BlobStorage } from '@lib/storage';
 import { E2E_GATEWAY_TOKEN, eventually, request, testEnv } from '@lib/testing';
 import type Redis from 'ioredis';
@@ -50,7 +56,12 @@ import { learningConfigSchema } from '../apps/learning/src/config';
 import { learningMigrationsFolder } from '../apps/learning/src/database';
 import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
 import { SessionRemindersService } from '../apps/learning/src/modules/cohorts/session-reminders.service';
+import { MEET_KIT } from '../apps/learning/src/modules/community/live.service';
 import { FilesService, STORAGE } from '../apps/learning/src/modules/files/files.service';
+import { AdmissionsAppModule } from '../apps/admissions/src/app.module';
+import { admissionsConfigSchema } from '../apps/admissions/src/config';
+import { admissionsMigrationsFolder } from '../apps/admissions/src/database';
+import { AI_EVALUATOR } from '../apps/admissions/src/modules/admissions/admissions.service';
 import { NotifyAppModule } from '../apps/notify/src/app.module';
 import { notifyConfigSchema } from '../apps/notify/src/config';
 import { notifyMigrationsFolder } from '../apps/notify/src/database';
@@ -103,14 +114,28 @@ let iam: NestFastifyApplication;
 let catalog: NestFastifyApplication;
 let learning: NestFastifyApplication;
 let notify: NestFastifyApplication;
+let admissions: NestFastifyApplication;
+
+/** Stands in for Claude: the e2e run never calls the API. */
+const fakeEvaluator = {
+  enabled: true,
+  evaluations: 0,
+  async evaluate() {
+    this.evaluations += 1;
+    const scores = { dream_clarity: 4, problem_insight: 4, evidence_of_action: 3, builder_mindset: 4, commitment: 5, communication: 3 };
+    return { model: 'claude-test', promptVersion: 'test-1', scores, rationale: 'Concrete evidence of a dryer built and sold; the plan to test demand is specific.' };
+  },
+};
 
 async function boot(module: unknown, rpcQueue: string | null, rabbitUrl: string): Promise<NestFastifyApplication> {
   const builder = Test.createTestingModule({ imports: [module as never] });
   if (module === iamModule) builder.overrideProvider(NOTIFIER).useValue(notifier);
+  if (module === learningModule) builder.overrideProvider(MEET_KIT).useValue(meetKit);
   const ref = await builder.compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { bufferLogs: true });
   app.useLogger(app.get(Logger));
   installGatewayTrust(app.getHttpAdapter().getInstance(), E2E_GATEWAY_TOKEN);
+  installWebhookBodyParser(app.getHttpAdapter().getInstance());
   if (rpcQueue) {
     app.connectMicroservice<MicroserviceOptions>({ transport: Transport.RMQ, options: { urls: [rabbitUrl], queue: rpcQueue, queueOptions: { durable: true } } }, { inheritAppConfig: true });
     await app.startAllMicroservices();
@@ -118,6 +143,28 @@ async function boot(module: unknown, rpcQueue: string | null, rabbitUrl: string)
   return app;
 }
 let iamModule: unknown;
+let learningModule: unknown;
+
+/** LiveKit settings for learning: the real webhook verification, with no media server behind it. */
+const LIVEKIT_ENV = { LIVEKIT_URL: 'ws://livekit.test', LIVEKIT_API_KEY: 'e2e-key', LIVEKIT_API_SECRET: 'e2e-livekit-secret-0123456789', MEETINGS_ROOM_PREFIX: 'dl-e2e' };
+
+/** The real MeetKit (room names, webhook checks) except that joining hands out a token without a server. */
+class TestMeetKit extends MeetKit {
+  joins: { roomName: string; identity: string; role: LiveRole; participantVideo: boolean }[] = [];
+  override async join(roomName: string, identity: string, _name: string, role: LiveRole, _emptyTimeoutMin?: number, options: { participantVideo?: boolean } = {}) {
+    this.joins.push({ roomName, identity, role, participantVideo: options.participantVideo ?? false });
+    return { url: LIVEKIT_ENV.LIVEKIT_URL, token: `test-token-${role}`, roomName, expiresAt: new Date(Date.now() + 3_600_000) };
+  }
+}
+let meetKit: TestMeetKit;
+
+/** A LiveKit webhook as the server sends it: JSON body, signed with the API key and secret. */
+async function liveKitWebhook(event: Record<string, unknown>) {
+  const body = JSON.stringify(event);
+  const at = new AccessToken(LIVEKIT_ENV.LIVEKIT_API_KEY, LIVEKIT_ENV.LIVEKIT_API_SECRET);
+  at.sha256 = createHash('sha256').update(body).digest('base64');
+  return learning.inject({ method: 'POST', url: '/v1/learning/meetings/webhook', payload: body, headers: { 'content-type': 'application/webhook+json', authorization: await at.toJwt() } });
+}
 
 async function signUp(email: string, fullName: string) {
   const reg = await request(iam, 'POST', '/v1/auth/register', { body: { email, password: 'correct horse battery', fullName, consent } });
@@ -173,9 +220,11 @@ beforeAll(async () => {
   await catalog.getHttpAdapter().getInstance().ready();
   await catalog.get(CatalogSeedService).run(DATASETS['dream-lab-test'], 'platform');
 
-  const learningConfig = loadConfig(learningConfigSchema, testEnv({ IAM_JWKS_URL: jwks }));
+  const learningConfig = loadConfig(learningConfigSchema, testEnv({ IAM_JWKS_URL: jwks, ...LIVEKIT_ENV }));
   await runMigrations(learningConfig.LEARNING_MIGRATION_DATABASE_URL!, learningMigrationsFolder());
-  learning = await boot(LearningAppModule.forRoot(learningConfig), null, learningConfig.RABBITMQ_URL);
+  meetKit = new TestMeetKit(learningConfig);
+  learningModule = LearningAppModule.forRoot(learningConfig);
+  learning = await boot(learningModule, null, learningConfig.RABBITMQ_URL);
   await learning.init();
   await learning.getHttpAdapter().getInstance().ready();
   await learning.get<BlobStorage>(STORAGE).prepareForDevelopment();
@@ -188,9 +237,19 @@ beforeAll(async () => {
   installGatewayTrust(notify.getHttpAdapter().getInstance(), E2E_GATEWAY_TOKEN);
   await notify.init();
   await notify.getHttpAdapter().getInstance().ready();
+
+  const admissionsConfig = loadConfig(admissionsConfigSchema, testEnv({ IAM_JWKS_URL: jwks }));
+  await runMigrations(admissionsConfig.ADMISSIONS_MIGRATION_DATABASE_URL!, admissionsMigrationsFolder());
+  const admissionsRef = await Test.createTestingModule({ imports: [AdmissionsAppModule.forRoot(admissionsConfig)] }).overrideProvider(AI_EVALUATOR).useValue(fakeEvaluator).compile();
+  admissions = admissionsRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { bufferLogs: true });
+  admissions.useLogger(admissions.get(Logger));
+  installGatewayTrust(admissions.getHttpAdapter().getInstance(), E2E_GATEWAY_TOKEN);
+  await admissions.init();
+  await admissions.getHttpAdapter().getInstance().ready();
 }, 180_000);
 
 afterAll(async () => {
+  await admissions?.close();
   await notify?.close();
   await learning?.close();
   await catalog?.close();
@@ -212,6 +271,9 @@ describe('contract parity', () => {
     ['learning (grading)', () => learning, apiV1Contract.grading],
     ['catalog (authoring)', () => catalog, apiV1Contract.authoring],
     ['notify', () => notify, apiV1Contract.notifications],
+    ['admissions', () => admissions, apiV1Contract.admissions],
+    ['learning (live and community)', () => learning, apiV1Contract.community],
+    ['catalog (instructors)', () => catalog, apiV1Contract.instructors],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -921,5 +983,306 @@ describe('class session reminders (NOTIFY-1)', () => {
     const sent = await reminders.run();
     expect(await reminders.run()).toBe(0);
     expect(sent).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('admissions (ADM-1)', () => {
+  let owner: string;
+  let officer: string;
+  let applicant: string;
+  let orgId: string;
+  let cohortId: string;
+  let cycle: AdmissionCycle;
+  let app: Application;
+  const long = (n: number, seed: string) => Array.from({ length: Math.ceil(n / seed.length) + 1 }, () => seed).join(' ').slice(0, n + 20);
+  const answers = {
+    eligibility: { isAdult: true, country: 'Nigeria', educationLevel: 'undergraduate', canCommitFullTime: true, hasDeviceAndInternet: true },
+    application: { city: 'Abuja', occupation: 'Agronomist', motivation: long(120, 'I want to turn my crop dryer into a business that serves my whole district.'), howHeard: 'A friend' },
+    dream_application: {
+      dream: long(90, 'Every smallholder in Kaduna dries grain without losing a third of it.'),
+      problem: long(90, 'Post-harvest losses from damp storage ruin grain and income.'),
+      whoBenefits: long(45, 'Smallholder farmers and their families.'),
+      whyYou: long(90, 'I built the first dryer myself and sold twelve to neighbours.'),
+    },
+    evidence: { items: [{ title: 'Solar grain dryer', description: 'Built from scrap and sold twelve units to farmers in my village.', link: null }] },
+    assessment: { answers: Object.fromEntries(['build', 'setback', 'resource', 'people', 'learning'].map((id) => [id, long(70, `My answer about ${id}, with what I did and what happened next.`)])) },
+    video: { url: 'https://video.example.com/my-pitch', note: '' },
+  };
+
+  const tokenFor = async (email: string, name: string) => {
+    const personal = await signUp(email, name);
+    expect((await request(iam, 'POST', '/v1/invitations/accept', { token: personal, body: { token: notifier.lastInviteToken(email) } })).status).toBe(200);
+    return ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+  };
+
+  beforeAll(async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const personal = await signUp('owner@abuja-academy.test', 'Amina Owner');
+    const org = await request(iam, 'POST', '/v1/orgs', { token: admin, body: { slug: 'abuja-academy', name: 'Abuja Academy', kinds: ['institution'], firstAdmin: { email: 'owner@abuja-academy.test' } } });
+    orgId = (org.body as { id: string }).id;
+    owner = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email: 'officer@abuja-academy.test', roleKeys: ['admissions_officer'] } })).status).toBe(201);
+    officer = await tokenFor('officer@abuja-academy.test', 'Obi Officer');
+    applicant = await signUp('builder@applicant.test', 'Bola Builder');
+    const cohort = await request(learning, 'POST', '/v1/learning/cohorts', { ...L(owner), body: { programSlug: 'the-african-dream-lab', name: 'Abuja 01', startsOn: todayIn('Africa/Lagos') } });
+    expect(cohort.status).toBe(201);
+    cohortId = (cohort.body as CohortDetail).id;
+  });
+
+  it('runs a cycle: created as a draft by admissions managers, open to everyone once opened', async () => {
+    const body = {
+      name: 'Abuja intake 2027',
+      programSlug: 'the-african-dream-lab',
+      cohortId,
+      opensAt: new Date(Date.now() - 60_000).toISOString(),
+      closesAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    };
+    expect((await request(admissions, 'POST', '/v1/admissions/admin/cycles', { ...L(officer), body })).status).toBe(403);
+    expect((await request(admissions, 'POST', '/v1/admissions/admin/cycles', { ...L(owner), body: { ...body, programSlug: 'no-such-programme' } })).status).toBe(404);
+    const created = await request(admissions, 'POST', '/v1/admissions/admin/cycles', { ...L(owner), body });
+    expect(created).toMatchObject({ status: 201, body: { status: 'draft', orgName: 'Abuja Academy', programTitle: expect.any(String), cohortId } });
+    cycle = created.body as AdmissionCycle;
+    const open = () => request(admissions, 'GET', '/v1/admissions/cycles?programSlug=the-african-dream-lab').then((r) => (r.body as { items: AdmissionCycle[] }).items.map((c) => c.id));
+    expect(await open()).not.toContain(cycle.id);
+    expect((await request(admissions, 'PATCH', `/v1/admissions/admin/cycles/${cycle.id}`, { ...L(owner), body: { status: 'open' } })).status).toBe(200);
+    expect(await open()).toContain(cycle.id);
+    expect(((await request(admissions, 'GET', '/v1/admissions/admin/cycles', L(officer))).body as { items: unknown[] }).items).toHaveLength(1);
+    expect((await request(admissions, 'GET', '/v1/admissions/admin/cycles', L(applicant))).status).toBe(403);
+  });
+
+  it('takes the applicant through their six stages, checking each before it moves on', async () => {
+    const started = await request(admissions, 'POST', '/v1/admissions/applications', { ...L(applicant), body: { cycleId: cycle.id } });
+    expect(started).toMatchObject({ status: 201, body: { stage: 'eligibility', status: 'in_progress', can: { edit: true, review: false, decide: false } } });
+    app = started.body as Application;
+    // Starting again resumes the same application.
+    expect(((await request(admissions, 'POST', '/v1/admissions/applications', { ...L(applicant), body: { cycleId: cycle.id } })).body as Application).id).toBe(app.id);
+
+    const incomplete = await request(admissions, 'POST', `/v1/admissions/applications/${app.id}/stages/eligibility/submit`, L(applicant));
+    expect(incomplete).toMatchObject({ status: 400, body: { code: 'stage_incomplete' } });
+    expect((await request(admissions, 'PUT', `/v1/admissions/applications/${app.id}/stages/application`, { ...L(applicant), body: { answers: {} } })).status).toBe(409);
+    for (const [stage, value] of Object.entries(answers)) {
+      expect((await request(admissions, 'PUT', `/v1/admissions/applications/${app.id}/stages/${stage}`, { ...L(applicant), body: { answers: value } })).status).toBe(200);
+      const submitted = await request(admissions, 'POST', `/v1/admissions/applications/${app.id}/stages/${stage}/submit`, L(applicant));
+      expect(submitted.status).toBe(200);
+      app = submitted.body as Application;
+    }
+    expect(app).toMatchObject({ stage: 'interview', status: 'under_review', can: { edit: false } });
+    expect(Object.keys(app.submitted)).toHaveLength(6);
+    expect(app.transitions.map((t) => t.to)).toEqual(['eligibility', 'application', 'dream_application', 'evidence', 'assessment', 'video', 'interview']);
+    await notificationsFor(officer, (n) => n.category === 'admissions' && n.title.includes('New application'));
+    // Applicants never reach the staff routes, and other people never see the application.
+    expect((await request(admissions, 'POST', `/v1/admissions/admin/applications/${app.id}/advance`, { ...L(applicant), body: {} })).status).toBe(403);
+    const nosy = await signUp('nosy@applicant.test', 'Nosy Neighbour');
+    expect((await request(admissions, 'GET', `/v1/admissions/applications/${app.id}`, L(nosy))).status).toBe(404);
+    expect(((await request(admissions, 'GET', '/v1/admissions/applications/mine', L(applicant))).body as { items: { id: string }[] }).items.map((i) => i.id)).toEqual([app.id]);
+  });
+
+  it('moves staff stages only with their records, keeps reviews and AI evaluations immutable, and leaves decisions to people', async () => {
+    const act = (path: string, token: string, method: 'POST' | 'PUT' = 'POST', body: unknown = {}) =>
+      request(admissions, method, `/v1/admissions/admin/applications/${app.id}/${path}`, { ...L(token), body });
+    expect(await act('advance', officer)).toMatchObject({ status: 409, body: { code: 'interview_missing' } });
+    const when = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    expect((await act('interview', officer, 'PUT', { scheduledAt: when, interviewerUserId: null, notes: 'Strong on evidence.' })).status).toBe(200);
+    await notificationsFor(applicant, (n) => n.title === 'Your admissions interview');
+    expect((await act('advance', officer, 'POST', { note: 'Interview went well' })).body).toMatchObject({ stage: 'scholarship' });
+    expect((await act('scholarship', officer, 'PUT', { percent: 50, note: 'Need shown' })).status).toBe(403);
+    expect((await act('scholarship', owner, 'PUT', { percent: 50, note: 'Need shown' })).status).toBe(200);
+    expect((await act('advance', officer)).body).toMatchObject({ stage: 'committee' });
+    expect(await act('advance', officer)).toMatchObject({ status: 409, body: { code: 'review_missing' } });
+
+    const scores = { dream_clarity: 5, problem_insight: 4, evidence_of_action: 5, builder_mindset: 4, commitment: 5, communication: 3 };
+    const reviewed = await act('reviews', officer, 'POST', { scores, recommendation: 'advance', comment: 'Built and sold a working product already.' });
+    expect(reviewed.status).toBe(201);
+    expect((reviewed.body as Application).reviews[0]).toMatchObject({ reviewer: 'Obi Officer', dbpi: 83, dsi: 83 });
+    const evaluated = await act('ai-evaluations', officer);
+    expect(evaluated.status).toBe(201);
+    expect((evaluated.body as Application).aiEvaluations[0]).toMatchObject({ model: 'claude-test', promptVersion: 'test-1', requestedBy: 'Obi Officer' });
+    const db = admissions.get<DatabaseService<Record<string, unknown>>>(DATABASE);
+    for (const table of ['ai_evaluations', 'application_reviews', 'stage_transitions']) {
+      await expect(db.systemPool.query(`update ${table} set org_id = org_id`)).rejects.toThrow(/permission denied/);
+      await expect(db.systemPool.query(`delete from ${table}`)).rejects.toThrow(/permission denied/);
+    }
+
+    expect((await act('advance', officer)).body).toMatchObject({ stage: 'decision', can: { review: true, decide: false } });
+    expect((await act('decision', officer, 'POST', { outcome: 'admitted', note: 'Committee agreed' })).status).toBe(403);
+    expect((await act('decision', owner, 'POST', { outcome: 'admitted', note: 'Committee agreed' })).body).toMatchObject({ status: 'admitted', decision: { outcome: 'admitted' } });
+
+    // The applicant sees the outcome and their award, never staff notes, reviews or the AI's view.
+    const mine = (await request(admissions, 'GET', `/v1/admissions/applications/${app.id}`, L(applicant))).body as Application;
+    expect(mine).toMatchObject({
+      status: 'admitted',
+      reviews: [],
+      aiEvaluations: [],
+      decision: { outcome: 'admitted', note: '', decidedBy: 'Admissions team' },
+      scholarship: { percent: 50, note: '' },
+      interview: { notes: '' },
+    });
+    await notificationsFor(applicant, (n) => n.title.startsWith('You are admitted'));
+  });
+
+  it('enrols the admitted applicant in the cohort of the cycle', async () => {
+    const programs = (await eventually(async () => {
+      const items = ((await request(learning, 'GET', '/v1/learning/me/programs', L(applicant))).body as { items: MyProgram[] }).items;
+      return items.length > 0 ? items : null;
+    })) as MyProgram[];
+    expect(programs.map((p) => p.cohort.id)).toEqual([cohortId]);
+  });
+});
+
+describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
+  let owner: string;
+  let mentor: string;
+  let ada: string;
+  let bayo: string;
+  let outsider: string;
+  let orgId: string;
+  let cohort: CohortDetail;
+  let session: CohortDetail['sessions'][number];
+  const ids: Record<string, string> = {};
+  const start = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60 * 60_000);
+  const at = (minutes: number) => String(Math.floor((start.getTime() + minutes * 60_000) / 1000));
+
+  const tokenFor = async (email: string, name: string) => {
+    const personal = await signUp(email, name);
+    expect((await request(iam, 'POST', '/v1/invitations/accept', { token: personal, body: { token: notifier.lastInviteToken(email) } })).status).toBe(200);
+    const switched = (await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string };
+    ids[email] = ((await request(iam, 'GET', '/v1/me', L(switched.accessToken))).body as { user: { id: string } }).user.id;
+    return switched.accessToken;
+  };
+
+  beforeAll(async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const personal = await signUp('owner@enugu-hub.test', 'Ebere Owner');
+    orgId = ((await request(iam, 'POST', '/v1/orgs', { token: admin, body: { slug: 'enugu-hub', name: 'Enugu Hub', kinds: ['enterprise'], firstAdmin: { email: 'owner@enugu-hub.test' } } })).body as { id: string }).id;
+    owner = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    for (const [email, role] of [
+      ['mentor@enugu-hub.test', 'mentor'],
+      ['ada@enugu-hub.test', 'learner'],
+      ['bayo@enugu-hub.test', 'learner'],
+    ] as const) {
+      expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email, roleKeys: [role] } })).status).toBe(201);
+    }
+    mentor = await tokenFor('mentor@enugu-hub.test', 'Mma Mentor');
+    ada = await tokenFor('ada@enugu-hub.test', 'Ada Eze');
+    bayo = await tokenFor('bayo@enugu-hub.test', 'Bayo Ade');
+    outsider = await signUp('outsider@live.test', 'Olu Outsider');
+
+    cohort = (await request(learning, 'POST', '/v1/learning/cohorts', { ...L(owner), body: { programSlug: 'the-african-dream-lab', name: 'Enugu 01', startsOn: todayIn('Africa/Lagos') } })).body as CohortDetail;
+    expect((await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(owner), body: { status: 'open' } })).status).toBe(200);
+    for (const t of [ada, bayo]) expect((await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(t), body: {} })).status).toBe(201);
+    // An online class that started an hour ago: its room is open.
+    session = cohort.sessions.find((s) => s.mode === 'virtual')!;
+    const moved = await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}`, { ...L(owner), body: { startsAt: start.toISOString() } });
+    expect(moved.status).toBe(200);
+  });
+
+  it('lets the cohort’s learners join a class as participants and its staff as hosts, nobody else', async () => {
+    const path = `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}`;
+    expect((await request(learning, 'GET', `${path}/live`, L(ada))).body).toMatchObject({ joinable: true, recordings: [] });
+    expect((await request(learning, 'POST', `${path}/join`, { ...L(ada), body: {} })).body).toMatchObject({ role: 'participant', roomName: `dl-e2e-session-${session.id}`, url: 'ws://livekit.test' });
+    expect((await request(learning, 'POST', `${path}/join`, { ...L(owner), body: {} })).body).toMatchObject({ role: 'host' });
+    expect((await request(learning, 'POST', `${path}/join`, { ...L(outsider), body: {} })).status).toBe(404);
+    const inPerson = cohort.sessions.find((s) => s.mode === 'physical')!;
+    expect(await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/sessions/${inPerson.id}/join`, { ...L(ada), body: {} })).toMatchObject({ status: 403 });
+  });
+
+  it('takes attendance from the room’s signed join and leave events, never over a faculty correction', async () => {
+    const room = { name: `dl-e2e-session-${session.id}` };
+    const event = (id: string, kind: string, identity: string, minutes: number) => ({ id, event: kind, createdAt: at(minutes), room, participant: { identity } });
+    expect((await liveKitWebhook(event('EV_ada_in', 'participant_joined', ids['ada@enugu-hub.test']!, 2))).statusCode).toBe(200);
+    expect((await liveKitWebhook(event('EV_ada_out', 'participant_left', ids['ada@enugu-hub.test']!, 47))).statusCode).toBe(200);
+    expect((await liveKitWebhook(event('EV_bayo_in', 'participant_joined', ids['bayo@enugu-hub.test']!, 20))).statusCode).toBe(200);
+    expect((await liveKitWebhook(event('EV_bayo_out', 'participant_left', ids['bayo@enugu-hub.test']!, 50))).statusCode).toBe(200);
+    // Redelivered events change nothing; events for another environment's rooms are ignored.
+    expect((await liveKitWebhook(event('EV_ada_in', 'participant_joined', ids['ada@enugu-hub.test']!, 2))).statusCode).toBe(200);
+    expect((await liveKitWebhook({ ...event('EV_other', 'participant_joined', ids['ada@enugu-hub.test']!, 1), room: { name: `dl-prod-session-${session.id}` } })).statusCode).toBe(200);
+    // A forged event is refused.
+    const forged = await learning.inject({ method: 'POST', url: '/v1/learning/meetings/webhook', payload: JSON.stringify(event('EV_x', 'participant_left', ids['ada@enugu-hub.test']!, 3)), headers: { 'content-type': 'application/webhook+json', authorization: 'not-a-token' } });
+    expect(forged.statusCode).toBe(400);
+
+    const sheet = async () => ((await request(learning, 'GET', `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}/attendance`, L(owner))).body as { items: { name: string; status: string | null; minutes: number | null }[] }).items;
+    expect(await sheet()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Ada Eze', status: 'present', minutes: 45 }), expect.objectContaining({ name: 'Bayo Ade', status: 'late', minutes: 30 })]));
+    expect((await request(learning, 'PUT', `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}/attendance`, { ...L(owner), body: { entries: [{ userId: ids['bayo@enugu-hub.test'], status: 'excused' }] } })).status).toBe(200);
+    expect((await liveKitWebhook(event('EV_bayo_in2', 'participant_joined', ids['bayo@enugu-hub.test']!, 55))).statusCode).toBe(200);
+    expect((await sheet()).find((i) => i.name === 'Bayo Ade')).toMatchObject({ status: 'excused' });
+  });
+
+  it('takes recordings from the class’s staff only, and lists them for its learners', async () => {
+    const path = `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}/recordings`;
+    const body = { title: 'Week 1 class', fileName: 'class.mp4', contentType: 'video/mp4', size: 1024 };
+    expect((await request(learning, 'POST', path, { ...L(ada), body })).status).toBe(403);
+    const ticket = await request(learning, 'POST', path, { ...L(owner), body });
+    expect(ticket).toMatchObject({ status: 201, body: { recordingId: expect.any(String), uploadUrl: expect.any(String) } });
+    expect(((await request(learning, 'GET', `/v1/learning/cohorts/${cohort.id}/sessions/${session.id}/live`, L(ada))).body as { recordings: { title: string }[] }).recordings.map((r) => r.title)).toEqual(['Week 1 class']);
+    expect(((await request(learning, 'GET', '/v1/learning/me/community', L(ada))).body as MyCommunity).recordings).toMatchObject([{ title: 'Week 1 class', weekNo: session.weekNo, cohortName: 'Enugu 01' }]);
+    expect(((await request(learning, 'GET', '/v1/learning/me/community', L(outsider))).body as MyCommunity).recordings).toEqual([]);
+    // The file never arrived: no link to it.
+    expect((await request(learning, 'GET', `/v1/learning/recordings/${(ticket.body as { recordingId: string }).recordingId}`, L(ada))).status).toBe(404);
+  });
+
+  it('pairs mentors with learners, who meet one to one with camera allowed', async () => {
+    const candidates = (await request(learning, 'GET', `/v1/learning/cohorts/${cohort.id}/mentors`, L(owner))).body as { candidates: { userId: string; name: string }[] };
+    expect(candidates.candidates.map((c) => c.name)).toContain('Mma Mentor');
+    expect((await request(learning, 'GET', `/v1/learning/cohorts/${cohort.id}/mentors`, L(ada))).status).toBe(403);
+    const notMentor = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/mentors`, { ...L(owner), body: { mentorUserId: ids['bayo@enugu-hub.test'], learnerUserIds: [ids['ada@enugu-hub.test']] } });
+    expect(notMentor).toMatchObject({ status: 400, body: { code: 'not_a_mentor' } });
+    const assigned = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/mentors`, { ...L(owner), body: { mentorUserId: ids['mentor@enugu-hub.test'], learnerUserIds: [ids['ada@enugu-hub.test']] } });
+    expect(assigned.status).toBe(201);
+    const assignmentId = (assigned.body as { items: { id: string }[] }).items[0]!.id;
+
+    const mine = (await request(learning, 'GET', '/v1/learning/mentoring', L(mentor))).body as { learners: { learner: { name: string } }[] };
+    expect(mine.learners.map((l) => l.learner.name)).toEqual(['Ada Eze']);
+    const scheduled = await request(learning, 'POST', '/v1/learning/mentoring/meetings', { ...L(mentor), body: { assignmentId, scheduledAt: new Date(Date.now() + 5 * 60_000).toISOString(), durationMin: 30 } });
+    expect(scheduled).toMatchObject({ status: 201, body: { joinable: true, mode: 'virtual' } });
+    const meetingId = (scheduled.body as { id: string }).id;
+    expect((await request(learning, 'POST', '/v1/learning/mentoring/meetings', { ...L(bayo), body: { assignmentId, scheduledAt: new Date().toISOString() } })).status).toBe(404);
+
+    const community = (await request(learning, 'GET', '/v1/learning/me/community', L(ada))).body as MyCommunity;
+    expect(community.mentors).toMatchObject([{ name: 'Mma Mentor', cohortName: 'Enugu 01' }]);
+    expect(community.meetings.map((m) => m.id)).toEqual([meetingId]);
+    expect((await request(learning, 'POST', `/v1/learning/mentoring/meetings/${meetingId}/join`, { ...L(ada), body: {} })).body).toMatchObject({ role: 'participant' });
+    expect(meetKit.joins.at(-1)).toMatchObject({ role: 'participant', participantVideo: true });
+    expect((await request(learning, 'POST', `/v1/learning/mentoring/meetings/${meetingId}/join`, { ...L(bayo), body: {} })).status).toBe(404);
+    await notificationsFor(ada, (n) => n.category === 'community');
+    // Once the mentorship ends, its meetings can no longer be joined.
+    expect((await request(learning, 'DELETE', `/v1/learning/mentor-assignments/${assignmentId}`, L(owner))).status).toBe(204);
+    expect((await request(learning, 'POST', `/v1/learning/mentoring/meetings/${meetingId}/join`, { ...L(ada), body: {} })).status).toBe(404);
+  });
+
+  it('forms Dream Circles from the cohort’s learners', async () => {
+    const members = [ids['ada@enugu-hub.test']!, ids['bayo@enugu-hub.test']!];
+    expect((await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/circles`, { ...L(owner), body: { name: 'Circle A', memberUserIds: [members[0], ids['mentor@enugu-hub.test']] } })).status).toBe(400);
+    const created = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/circles`, { ...L(owner), body: { name: 'Circle A', memberUserIds: members } });
+    expect(created.status).toBe(201);
+    const circles = ((await request(learning, 'GET', '/v1/learning/me/community', L(bayo))).body as MyCommunity).circles;
+    expect(circles).toMatchObject([{ name: 'Circle A', cohortName: 'Enugu 01' }]);
+    expect(circles[0]!.members.map((m) => m.name).sort()).toEqual(['Ada Eze', 'Bayo Ade']);
+  });
+});
+
+describe('instructors and course staff (INSTR-1)', () => {
+  it('keeps the organisation’s instructor profiles and shows a course’s staff on its page', async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const learner = await signUp('reader@instructors.test', 'Rita Reader');
+    expect((await request(catalog, 'GET', '/v1/catalog/instructors', L(learner))).status).toBe(403);
+    const created = await request(catalog, 'POST', '/v1/catalog/instructors', { ...L(admin), body: { name: 'Dr Funmi Lead', title: 'Programme lead', bio: 'Teaches problem solving.' } });
+    expect(created).toMatchObject({ status: 201, body: { name: 'Dr Funmi Lead', courses: [] } });
+    const profileId = (created.body as { id: string }).id;
+    const bad = await request(catalog, 'POST', '/v1/catalog/instructors', { ...L(admin), body: { name: 'Bad Photo', photoUrl: 'https://evil.example/x.png' } });
+    expect(bad.status).toBe(400);
+
+    expect((await request(catalog, 'PUT', '/v1/catalog/courses/problem-solving/staff', { ...L(learner), body: { staff: [{ profileId, role: 'lead' }] } })).status).toBe(404);
+    expect((await request(catalog, 'PUT', '/v1/catalog/courses/problem-solving/staff', { ...L(admin), body: { staff: [{ profileId, role: 'lead' }] } })).status).toBe(200);
+    const page = (await request(catalog, 'GET', '/v1/catalog/courses/problem-solving')).body as { instructors: { name: string; role?: string }[] };
+    expect(page.instructors).toMatchObject([{ name: 'Dr Funmi Lead', role: 'lead' }]);
+    expect(((await request(catalog, 'GET', '/v1/catalog/instructors', L(admin))).body as { items: { id: string; courses: { slug: string }[] }[] }).items.find((i) => i.id === profileId)!.courses).toMatchObject([{ slug: 'problem-solving' }]);
+
+    // Removing the staff brings back the instructors in the course's file.
+    expect((await request(catalog, 'PUT', '/v1/catalog/courses/problem-solving/staff', { ...L(admin), body: { staff: [] } })).status).toBe(200);
+    expect(((await request(catalog, 'GET', '/v1/catalog/courses/problem-solving')).body as { instructors: { name: string }[] }).instructors.map((i) => i.name)).not.toContain('Dr Funmi Lead');
+    expect((await request(catalog, 'DELETE', `/v1/catalog/instructors/${profileId}`, L(admin))).status).toBe(204);
   });
 });

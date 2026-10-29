@@ -76,6 +76,12 @@ describe('context-neutral paths', () => {
     ['/v1/orgs/123/members', false],
     ['/v1/invitations/preview/extra', false],
     ['/v1/mexico', false],
+    ['/v1/admissions/cycles', true],
+    ['/v1/admissions/cycles?programSlug=the-african-dream-lab', true],
+    ['/v1/admissions/applications/mine', true],
+    ['/v1/admissions/applications/01a1842c-0b8c-77de-b403-f45faf157a5c/stages/video/submit', true],
+    ['/v1/admissions/admin/cycles', false],
+    ['/v1/admissions/admin/applications/01a1842c-0b8c-77de-b403-f45faf157a5c/decision', false],
   ])('%s → %s', (path, expected) => expect(isContextNeutral(path)).toBe(expected));
 });
 
