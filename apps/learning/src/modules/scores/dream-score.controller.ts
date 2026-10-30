@@ -8,10 +8,10 @@ import { DreamScoreService } from './dream-score.service';
 
 const r = apiV1Contract.outcomes;
 
-class EnrollmentParamsDto extends createZodDto(z.object({ enrollmentId: UuidSchema })) {}
+class DreamScoreParamsDto extends createZodDto(z.object({ enrollmentId: UuidSchema })) {}
 class DreamScoreDto extends createZodDto(DreamScoreSchema) {}
-class WeightsDto extends createZodDto(z.object({ weights: z.record(DreamScoreDimensionSchema, z.number().int()) })) {}
-class SetWeightsDto extends createZodDto(z.object({ weights: DreamScoreWeightsSchema })) {}
+class DreamScoreWeightsDto extends createZodDto(z.object({ weights: z.record(DreamScoreDimensionSchema, z.number().int()) })) {}
+class SetDreamScoreWeightsDto extends createZodDto(z.object({ weights: DreamScoreWeightsSchema })) {}
 
 /** The Dream Score™ (SCORE-1): a learner's competency radar, and the organisation's dimension weights. */
 @ApiTags('dream-score')
@@ -23,14 +23,14 @@ export class DreamScoreController {
   @Get('programs/enrollments/:enrollmentId/dream-score')
   @ApiOperation({ summary: r.dreamScore.summary })
   @ZodResponse({ status: 200, type: DreamScoreDto })
-  dreamScore(@Param() p: EnrollmentParamsDto, @CurrentPrincipal() principal: Principal) {
+  dreamScore(@Param() p: DreamScoreParamsDto, @CurrentPrincipal() principal: Principal) {
     return this.scores.get(principal, p.enrollmentId);
   }
 
   @Get('dream-score/weights')
   @RequirePermission('cohort.manage')
   @ApiOperation({ summary: r.dreamScoreWeights.summary })
-  @ZodResponse({ status: 200, type: WeightsDto })
+  @ZodResponse({ status: 200, type: DreamScoreWeightsDto })
   weights(@CurrentPrincipal() principal: Principal) {
     return this.scores.weights(principal);
   }
@@ -38,8 +38,8 @@ export class DreamScoreController {
   @Put('dream-score/weights')
   @RequirePermission('cohort.manage')
   @ApiOperation({ summary: r.setDreamScoreWeights.summary })
-  @ZodResponse({ status: 200, type: WeightsDto })
-  setWeights(@Body() dto: SetWeightsDto, @CurrentPrincipal() principal: Principal) {
+  @ZodResponse({ status: 200, type: DreamScoreWeightsDto })
+  setWeights(@Body() dto: SetDreamScoreWeightsDto, @CurrentPrincipal() principal: Principal) {
     return this.scores.setWeights(principal, dto.weights as DreamScoreWeights);
   }
 }

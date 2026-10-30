@@ -10,4 +10,5 @@ module.exports = {
   forceExit: true,
   globalSetup: '<rootDir>/libs/testing/src/global-setup.ts',
   globalTeardown: '<rootDir>/libs/testing/src/global-teardown.ts',
+  testSequencer: '<rootDir>/libs/testing/src/sequencer.js',
 };
