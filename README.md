@@ -16,7 +16,9 @@ apps/
   learning/  enrolments, the course player, submissions and files, cohorts, attendance, grading,
              Programme Score, class-session reminders, live classes (LiveKit rooms, recordings,
              attendance from join/leave webhooks), mentorship and Dream Circles; enrols people
-             admissions admitted
+             admissions admitted; the Dream Residency, 12-month action plan, graduation checklist,
+             Dream Portfolio, credentials (public verification), the Dream Score (append-only
+             evidence, weekly snapshots) and assigned learning
   notify/    notifications: one per person (in the app), email by category preference; fed by
              `notification.requested` events from any service
   admissions/ admission cycles and the ten-stage application pipeline: applicant stages, reviews
