@@ -9,11 +9,11 @@ import { and, asc, eq, gt, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
 import { LearningEvents } from '../../events';
 import { CATALOG, flatItems } from '../enrollments/enrollments.service';
-import { programmeScore } from '../grading/course-score';
+import { programmeScore, residencyItems } from '../grading/course-score';
 import { addDays, todayIn, weekOf } from './calendar-time';
 import { CohortRow, learnerCounts, toCalendarWeek, toCohort, toSession } from './cohorts.service';
 
-const { cohorts, calendarWeeks, courseRuns, classSessions, programEnrollments, electiveSelections, attendance, courseEnrollments, itemProgress, submissions } = schema;
+const { cohorts, calendarWeeks, courseRuns, classSessions, programEnrollments, electiveSelections, attendance, courseEnrollments, itemProgress, submissions, residencyStages } = schema;
 type ProgramEnrollmentRow = typeof programEnrollments.$inferSelect;
 type RunRow = typeof courseRuns.$inferSelect;
 
@@ -302,6 +302,12 @@ export class ProgramsService {
       });
 
     const electives = this.electives(cohort, program, runs, summaries, mine.selections.map((s) => ({ group: s.groupKey, slug: s.courseSlug })), now);
+    // Approved Dream Residency stages count towards the Programme Score with their credit hours.
+    const approvedStages = await this.db.sys
+      .select({ position: residencyStages.position, score: residencyStages.scorePct })
+      .from(residencyStages)
+      .where(and(eq(residencyStages.programEnrollmentId, pe.id), eq(residencyStages.status, 'approved')));
+    const stages = residencyItems(program?.capstoneStages ?? [], new Map(approvedStages.map((r) => [r.position, r.score!])));
 
     return {
       enrollment: { id: pe.id, status: pe.status, enrolledAt: pe.enrolledAt.toISOString() },
@@ -310,7 +316,7 @@ export class ProgramsService {
       calendar,
       upcomingSessions: upcoming.map(toSession),
       courses,
-      score: programmeScore(courses.map((c) => ({ credits: c.creditHours, score: c.score }))),
+      score: programmeScore([...courses.map((c) => ({ credits: c.creditHours, score: c.score })), ...stages]),
       electives,
       attendance: { attended: attended[0]?.n ?? 0, held: held[0]?.n ?? 0 },
     };

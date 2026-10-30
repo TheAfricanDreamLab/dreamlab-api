@@ -63,34 +63,48 @@ export class EnrollmentsService {
     const isPrivate = content.course.visibility === 'org_private';
     if (isPrivate && p.orgId !== content.course.ownerOrgId && !p.platformAdmin) throw notFound('course_not_found', 'Course not found');
 
-    return this.db.tenant(learnerCtx(p), async (tx) => {
-      const existing = await this.findInContext(tx, p, content.course.id);
-      if (existing) return toEnrollment(existing);
-      const total = flatItems(content).filter((i) => i.required).length;
-      const [row] = await tx
-        .insert(courseEnrollments)
-        .values({
-          id: newId(),
-          userId: p.userId,
-          courseId: content.course.id,
-          courseSlug: content.course.slug,
-          courseVersionId: content.version.id,
-          contextOrgId: p.orgId,
-          accessSource: isPrivate ? 'org_private' : 'free',
-          totalItems: total,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (!row) return toEnrollment((await this.findInContext(tx, p, content.course.id))!);
-      await this.outbox.add(tx, {
-        type: LearningEvents.EnrollmentCreated,
-        orgId: p.orgId,
-        actor: userActor(p.userId),
-        requestId,
-        payload: { enrollmentId: row.id, userId: p.userId, courseId: row.courseId, versionId: row.courseVersionId, contextOrgId: p.orgId },
-      });
-      return toEnrollment(row);
+    return this.db.tenant(learnerCtx(p), async (tx) => toEnrollment((await this.enrolInContext(tx, p.userId, p.orgId, content, p.userId, requestId)).row));
+  }
+
+  /**
+   * Enrols a person in a course in an organisation's context (null: personal learning), or returns
+   * their existing enrolment there. Used by self-enrolment and by assigned learning (ASSIGN-1).
+   */
+  async enrolInContext(tx: LearningTx, userId: string, orgId: string | null, content: CourseContent, actorUserId: string, requestId?: string): Promise<{ row: EnrollmentRow; created: boolean }> {
+    const inContext = async () =>
+      (
+        await tx
+          .select()
+          .from(courseEnrollments)
+          .where(and(eq(courseEnrollments.userId, userId), eq(courseEnrollments.courseId, content.course.id), orgId ? eq(courseEnrollments.contextOrgId, orgId) : isNull(courseEnrollments.contextOrgId)))
+      )[0];
+    const existing = await inContext();
+    if (existing) return { row: existing, created: false };
+    const isPrivate = content.course.visibility === 'org_private';
+    const total = flatItems(content).filter((i) => i.required).length;
+    const [row] = await tx
+      .insert(courseEnrollments)
+      .values({
+        id: newId(),
+        userId,
+        courseId: content.course.id,
+        courseSlug: content.course.slug,
+        courseVersionId: content.version.id,
+        contextOrgId: orgId,
+        accessSource: isPrivate ? 'org_private' : 'free',
+        totalItems: total,
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) return { row: (await inContext())!, created: false };
+    await this.outbox.add(tx, {
+      type: LearningEvents.EnrollmentCreated,
+      orgId,
+      actor: userActor(actorUserId),
+      requestId,
+      payload: { enrollmentId: row.id, userId, courseId: row.courseId, versionId: row.courseVersionId, contextOrgId: orgId },
     });
+    return { row, created: true };
   }
 
   async mine(p: Principal): Promise<{ items: EnrollmentSummary[] }> {

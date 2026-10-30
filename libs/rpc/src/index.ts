@@ -36,6 +36,10 @@ export const IamRpc = {
   ResolveOrg: 'iam.orgs.resolve',
   /** { ids } → { id, name }[] */
   OrgNames: 'iam.orgs.names',
+  /** { orgId, userIds } → userId[]: those who are active members (assigned learning). */
+  ActiveMembers: 'iam.orgs.active_members',
+  /** { orgId, groupIds } → userId[]: active members in any of the groups (assigned learning); at most 2,000, ordered by user id. */
+  GroupMembers: 'iam.orgs.group_members',
 } as const;
 
 export interface ContentItemRef {
