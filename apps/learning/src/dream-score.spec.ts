@@ -1,6 +1,6 @@
 import { DEFAULT_DREAM_SCORE_WEIGHTS, DREAM_SCORE_DIMENSIONS } from '@dreamlab/contracts';
 import { assigneeStatus } from './modules/assigned/assignee-status';
-import { ATTENDANCE_VALUES, computeDreamScore, COURSE_DIMENSIONS, type Evidence, RESIDENCY_DIMENSIONS } from './modules/scores/dream-score';
+import { ATTENDANCE_VALUES, changedEvidence, computeDreamScore, COURSE_DIMENSIONS, type Evidence, latestRevisions, RESIDENCY_DIMENSIONS } from './modules/scores/dream-score';
 
 describe('Dream Score maths', () => {
   it('has no score before any evidence', () => {
@@ -57,5 +57,25 @@ describe('assigned learning status', () => {
   it('has not started without progress or an enrolment', () => {
     expect(assigneeStatus({ status: 'active', progressPct: 0 }, null, now)).toBe('not_started');
     expect(assigneeStatus(null, null, now)).toBe('not_started');
+  });
+});
+
+describe('Dream Score evidence revisions', () => {
+  const grade = (value: number) => ({ source: 'course_grade' as const, sourceId: 'ce-1', dimension: 'negotiation', value });
+
+  it('records a source once while its value stays the same', () => {
+    expect(changedEvidence([grade(8.2)], [])).toEqual([{ ...grade(8.2), revision: 1 }]);
+    expect(changedEvidence([grade(8.2)], [{ ...grade(8.2), revision: 1 }])).toEqual([]);
+  });
+
+  it('appends the next revision when a source changes, and counts only the latest', () => {
+    const stored = [{ ...grade(8.2), revision: 1 }];
+    const next = changedEvidence([grade(7.5)], stored);
+    expect(next).toEqual([{ ...grade(7.5), revision: 2 }]);
+    // Back to an earlier value is still a change from the latest revision.
+    const third = changedEvidence([grade(8.2)], [...stored, ...next]);
+    expect(third).toEqual([{ ...grade(8.2), revision: 3 }]);
+    expect(latestRevisions([...stored, ...next, ...third]).map((e) => e.value)).toEqual([8.2]);
+    expect(latestRevisions([...stored, ...next]).map((e) => e.value)).toEqual([7.5]);
   });
 });

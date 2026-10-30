@@ -40,6 +40,9 @@ export class GraduationService {
     if (ctx.pe.graduatedAt) throw conflict('already_graduated', 'This learner has graduated.');
     if (!ctx.program.graduationRequirements.some((r) => r.key === key)) throw notFound('requirement_not_found', 'Requirement not found');
     await this.db.system(async (tx) => {
+      // Graduating takes the same lock, so a confirmation cannot change once the learner has graduated.
+      const [locked] = await tx.select({ graduatedAt: programEnrollments.graduatedAt }).from(programEnrollments).where(eq(programEnrollments.id, ctx.pe.id)).for('update');
+      if (locked?.graduatedAt) throw conflict('already_graduated', 'This learner has graduated.');
       if (input.confirmed) {
         await tx
           .insert(graduationConfirmations)

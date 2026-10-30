@@ -47,7 +47,8 @@ export class ResidencyService {
         await tx
           .insert(residencyStages)
           .values({ id: newId(), programEnrollmentId: ctx.pe.id, hostOrgId: ctx.cohort.hostOrgId, userId: ctx.pe.userId, position, text: input.text, links: input.links })
-          .onConflictDoNothing();
+          // A concurrent first save created the draft meanwhile: this save updates it.
+          .onConflictDoUpdate({ target: [residencyStages.programEnrollmentId, residencyStages.position], set: { text: input.text, links: input.links, updatedAt: new Date() } });
       }
     });
     return this.view(ctx);

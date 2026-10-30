@@ -3,8 +3,9 @@ import { index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, u
 import { programEnrollments } from '../../cohorts/entities/program-enrollment.entity';
 
 /**
- * Append-only evidence for the Dream Score™ (SCORE-1): one row per (source record, dimension), so
- * reading a source twice adds nothing. Updates and deletes are revoked; scores recompute from here.
+ * Append-only evidence for the Dream Score™ (SCORE-1): one row per (source record, dimension,
+ * revision). Reading an unchanged source adds nothing; a changed one (a regrade, a corrected mark)
+ * adds its next revision, and scores use each source's latest. Updates and deletes are revoked.
  */
 export const competencyEvents = pgTable(
   'competency_events',
@@ -19,11 +20,13 @@ export const competencyEvents = pgTable(
     source: text('source', { enum: ['course_grade', 'residency_stage', 'mentor_meeting', 'attendance'] }).notNull(),
     /** The record the evidence came from (a grade, a residency review, a meeting, an attendance mark). */
     sourceId: uuid('source_id').notNull(),
+    /** 1 for the first value seen; each changed value appends the next. */
+    revision: integer('revision').notNull().default(1),
     label: text('label').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('competency_events_once').on(t.source, t.sourceId, t.dimension), index('competency_events_enrollment_idx').on(t.programEnrollmentId, t.occurredAt)],
+  (t) => [uniqueIndex('competency_events_revision').on(t.source, t.sourceId, t.dimension, t.revision), index('competency_events_enrollment_idx').on(t.programEnrollmentId, t.occurredAt)],
 );
 
 /** The score each cohort week (recomputed while the week is current): Learning, Building, Dream. */

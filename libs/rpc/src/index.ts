@@ -38,7 +38,7 @@ export const IamRpc = {
   OrgNames: 'iam.orgs.names',
   /** { orgId, userIds } → userId[]: those who are active members (assigned learning). */
   ActiveMembers: 'iam.orgs.active_members',
-  /** { orgId, groupIds } → userId[]: active members in any of the groups (assigned learning). */
+  /** { orgId, groupIds } → userId[]: active members in any of the groups (assigned learning); at most 2,000, ordered by user id. */
   GroupMembers: 'iam.orgs.group_members',
 } as const;
 

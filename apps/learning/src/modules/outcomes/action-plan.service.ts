@@ -34,7 +34,12 @@ export class ActionPlanService {
       if (current && !editable(current.status)) throw conflict('plan_locked', current.status === 'approved' ? 'Your action plan is approved.' : 'Your action plan is with faculty for review.');
       const [saved] = current
         ? await tx.update(actionPlans).set({ body, updatedAt: new Date() }).where(eq(actionPlans.programEnrollmentId, ctx.pe.id)).returning()
-        : await tx.insert(actionPlans).values({ programEnrollmentId: ctx.pe.id, hostOrgId: ctx.cohort.hostOrgId, userId: ctx.pe.userId, body }).returning();
+        : await tx
+            .insert(actionPlans)
+            .values({ programEnrollmentId: ctx.pe.id, hostOrgId: ctx.cohort.hostOrgId, userId: ctx.pe.userId, body })
+            // A concurrent first save created the draft meanwhile: this save updates it.
+            .onConflictDoUpdate({ target: actionPlans.programEnrollmentId, set: { body, updatedAt: new Date() } })
+            .returning();
       return saved!;
     });
     return this.view(ctx, row);

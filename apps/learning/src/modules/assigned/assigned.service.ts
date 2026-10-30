@@ -197,9 +197,11 @@ export class AssignedService {
     return out;
   }
 
+  /** Display names, asked for in batches of 500 (the most the IAM RPC takes at once). */
   private async names(ids: string[]): Promise<Map<string, string>> {
-    if (ids.length === 0) return new Map();
-    const rows = await this.iam.send<UserName[]>(IamRpc.UserNames, { userIds: ids }).catch(() => [] as UserName[]);
+    const batches: string[][] = [];
+    for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
+    const rows = (await Promise.all(batches.map((userIds) => this.iam.send<UserName[]>(IamRpc.UserNames, { userIds }).catch(() => [] as UserName[])))).flat();
     return new Map(rows.map((r) => [r.id, r.name]));
   }
 }

@@ -6,7 +6,7 @@ import { InjectConfig } from '@lib/config';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, userActor } from '@lib/messaging';
 import type { UserContact } from '@lib/rpc';
-import { and, desc, eq, gt, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { IamConfig } from '../../config';
 import { IamDatabase, schema } from '../../database';
 import { IamEvents } from '../../events';
@@ -160,7 +160,7 @@ export class PlatformService {
     return rows.map((r) => r.userId);
   }
 
-  /** Active members in any of these groups of the organisation (assigned learning). */
+  /** Active members in any of these groups of the organisation (assigned learning): at most 2,000, by user id. */
   async groupMembers(orgId: string, groupIds: string[]): Promise<string[]> {
     if (groupIds.length === 0) return [];
     const rows = await this.db.sys
@@ -169,6 +169,7 @@ export class PlatformService {
       .innerJoin(memberships, eq(memberships.id, groupMembers.membershipId))
       .innerJoin(users, eq(users.id, memberships.userId))
       .where(and(eq(groupMembers.orgId, orgId), inArray(groupMembers.groupId, groupIds), eq(memberships.orgId, orgId), eq(memberships.status, 'active'), eq(users.status, 'active')))
+      .orderBy(asc(memberships.userId))
       .limit(2000);
     return rows.map((r) => r.userId);
   }

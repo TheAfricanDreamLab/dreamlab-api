@@ -4,12 +4,22 @@ import { AUTHZ_CHECKER, type AuthzChecker, hasOrgPermission, type Principal } fr
 import { forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { CatalogClient } from '@lib/rpc';
-import { and, asc, desc, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import { LearningDatabase, schema } from '../../database';
 import { todayIn, weekOf } from '../cohorts/calendar-time';
 import { CATALOG } from '../enrollments/enrollments.service';
 import { courseFinalScore, itemScores } from '../grading/course-score';
-import { ATTENDANCE_VALUES, computeDreamScore, COURSE_DIMENSIONS, type Evidence, MENTOR_MEETING_EVIDENCE, pct, RESIDENCY_DIMENSIONS } from './dream-score';
+import {
+  ATTENDANCE_VALUES,
+  changedEvidence,
+  computeDreamScore,
+  COURSE_DIMENSIONS,
+  latestRevisions,
+  MENTOR_MEETING_EVIDENCE,
+  pct,
+  RESIDENCY_DIMENSIONS,
+  type RevisedEvidence,
+} from './dream-score';
 
 const {
   cohorts,
@@ -31,6 +41,8 @@ type NewEvent = typeof competencyEvents.$inferInsert;
 /** Attendance becomes evidence once corrections have had time to land (the evidence is append-only). */
 const ATTENDANCE_SETTLES_MS = 48 * 3_600_000;
 const SYNC_EVERY_MS = 60 * 60_000;
+/** The hourly sync walks active enrolments in pages of this size. */
+const SYNC_PAGE = 500;
 const RECENT = 15;
 
 /**
@@ -77,7 +89,7 @@ export class DreamScoreService implements OnApplicationBootstrap, OnApplicationS
       this.db.sys.select().from(dreamScoreSnapshots).where(eq(dreamScoreSnapshots.programEnrollmentId, pe.id)).orderBy(asc(dreamScoreSnapshots.weekNo)),
       this.weightsOf(cohort.hostOrgId),
     ]);
-    const computed = computeDreamScore(events as Evidence[], weights);
+    const computed = computeDreamScore(latestRevisions(events as RevisedEvidence[]), weights);
     return {
       programEnrollmentId: pe.id,
       overall: computed.overall,
@@ -122,21 +134,34 @@ export class DreamScoreService implements OnApplicationBootstrap, OnApplicationS
 
   // ---------- evidence ----------
 
-  /** Every active learner of running cohorts, a batch at a time: keeps snapshots weekly without anyone opening the page. */
+  /** Every active learner of running cohorts, a page at a time: keeps snapshots weekly without anyone opening the page. */
   async syncAll(now = new Date()): Promise<number> {
-    const rows = await this.db.sys
-      .select({ pe: programEnrollments, cohort: cohorts })
-      .from(programEnrollments)
-      .innerJoin(cohorts, eq(cohorts.id, programEnrollments.cohortId))
-      .where(and(eq(cohorts.status, 'running'), eq(programEnrollments.status, 'active')))
-      .limit(2000);
-    for (const { pe, cohort } of rows) await this.sync(pe, cohort, now);
-    return rows.length;
+    let after: string | null = null;
+    let done = 0;
+    for (;;) {
+      const rows = await this.db.sys
+        .select({ pe: programEnrollments, cohort: cohorts })
+        .from(programEnrollments)
+        .innerJoin(cohorts, eq(cohorts.id, programEnrollments.cohortId))
+        .where(and(eq(cohorts.status, 'running'), eq(programEnrollments.status, 'active'), after ? gt(programEnrollments.id, after) : undefined))
+        .orderBy(asc(programEnrollments.id))
+        .limit(SYNC_PAGE);
+      for (const { pe, cohort } of rows) await this.sync(pe, cohort, now);
+      done += rows.length;
+      if (rows.length < SYNC_PAGE) return done;
+      after = rows[rows.length - 1]!.pe.id;
+    }
   }
 
-  /** Adds the evidence not yet recorded (idempotent), then refreshes this week's snapshot. */
+  /**
+   * Appends the evidence not yet recorded and the next revision of any that changed (a regrade, a
+   * corrected attendance mark), then refreshes this week's snapshot. Concurrent syncs append at most
+   * one row per revision (the unique index).
+   */
   async sync(pe: EnrollmentRow, cohort: CohortRow, now = new Date()): Promise<void> {
-    const events = [...(await this.courseEvidence(pe, cohort)), ...(await this.residencyEvidence(pe, cohort)), ...(await this.mentorEvidence(pe, cohort)), ...(await this.attendanceEvidence(pe, cohort, now))];
+    const candidates = [...(await this.courseEvidence(pe, cohort)), ...(await this.residencyEvidence(pe, cohort)), ...(await this.mentorEvidence(pe, cohort)), ...(await this.attendanceEvidence(pe, cohort, now))];
+    const stored = (await this.db.sys.select().from(competencyEvents).where(eq(competencyEvents.programEnrollmentId, pe.id))) as RevisedEvidence[];
+    const events = changedEvidence(candidates, stored);
     if (events.length > 0) await this.db.system((tx) => tx.insert(competencyEvents).values(events).onConflictDoNothing());
     await this.snapshot(pe, cohort, now);
   }
@@ -237,7 +262,7 @@ export class DreamScoreService implements OnApplicationBootstrap, OnApplicationS
       this.db.sys.select().from(competencyEvents).where(eq(competencyEvents.programEnrollmentId, pe.id)),
       this.weightsOf(cohort.hostOrgId),
     ]);
-    const c = computeDreamScore(events as Evidence[], weights);
+    const c = computeDreamScore(latestRevisions(events as RevisedEvidence[]), weights);
     const values = {
       hostOrgId: cohort.hostOrgId,
       learning: c.learning,

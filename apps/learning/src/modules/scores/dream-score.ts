@@ -77,3 +77,40 @@ export function computeDreamScore(events: Evidence[], weights: DreamScoreWeights
 
 /** "82%" for whole numbers, "82.5%" otherwise. */
 export const pct = (n: number) => `${Math.round(n * 10) / 10}%`;
+
+/** Evidence as stored: which source record it came from, and its revision. */
+export interface RevisedEvidence extends Evidence {
+  sourceId: string;
+  revision: number;
+}
+
+const evidenceKey = (e: { source: string; sourceId: string; dimension: string }) => `${e.source}:${e.sourceId}:${e.dimension}`;
+
+/** Each source's latest revision: what the score counts (earlier revisions stay as history). */
+export function latestRevisions<T extends RevisedEvidence>(events: T[]): T[] {
+  const latest = new Map<string, T>();
+  for (const e of events) {
+    const k = evidenceKey(e);
+    const seen = latest.get(k);
+    if (!seen || e.revision > seen.revision) latest.set(k, e);
+  }
+  return [...latest.values()];
+}
+
+/**
+ * The evidence to append: sources not yet recorded (revision 1), and sources whose value changed
+ * since their latest revision (the next revision). Unchanged sources add nothing.
+ */
+export function changedEvidence<T extends { source: string; sourceId: string; dimension: string; value: number }>(
+  candidates: T[],
+  stored: RevisedEvidence[],
+): Array<T & { revision: number }> {
+  const latest = new Map(latestRevisions(stored).map((e) => [evidenceKey(e), e]));
+  const out: Array<T & { revision: number }> = [];
+  for (const c of candidates) {
+    const prev = latest.get(evidenceKey(c));
+    if (!prev) out.push({ ...c, revision: 1 });
+    else if (Math.abs(prev.value - c.value) > 1e-9) out.push({ ...c, revision: prev.revision + 1 });
+  }
+  return out;
+}
