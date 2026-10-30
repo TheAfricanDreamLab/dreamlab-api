@@ -4,7 +4,7 @@ import type { Principal } from '@lib/auth';
 import { badRequest, conflict, forbidden } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { LearningDatabase, schema } from '../../database';
 import { type ActionPlanRow, type OutcomesContext, ProgressService } from './progress.service';
 
@@ -37,10 +37,11 @@ export class ActionPlanService {
         : await tx
             .insert(actionPlans)
             .values({ programEnrollmentId: ctx.pe.id, hostOrgId: ctx.cohort.hostOrgId, userId: ctx.pe.userId, body })
-            // A concurrent first save created the draft meanwhile: this save updates it.
-            .onConflictDoUpdate({ target: actionPlans.programEnrollmentId, set: { body, updatedAt: new Date() } })
+            // A concurrent first save created the plan meanwhile: update it only while still editable.
+            .onConflictDoUpdate({ target: actionPlans.programEnrollmentId, set: { body, updatedAt: new Date() }, setWhere: inArray(actionPlans.status, ['draft', 'changes_requested']) })
             .returning();
-      return saved!;
+      if (!saved) throw conflict('plan_locked', 'Your action plan is with faculty for review.');
+      return saved;
     });
     return this.view(ctx, row);
   }

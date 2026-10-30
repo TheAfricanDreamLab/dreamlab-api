@@ -44,11 +44,17 @@ export class ResidencyService {
       if (row) {
         await tx.update(residencyStages).set({ text: input.text, links: input.links, updatedAt: new Date() }).where(eq(residencyStages.id, row.id));
       } else {
-        await tx
+        const [saved] = await tx
           .insert(residencyStages)
           .values({ id: newId(), programEnrollmentId: ctx.pe.id, hostOrgId: ctx.cohort.hostOrgId, userId: ctx.pe.userId, position, text: input.text, links: input.links })
-          // A concurrent first save created the draft meanwhile: this save updates it.
-          .onConflictDoUpdate({ target: [residencyStages.programEnrollmentId, residencyStages.position], set: { text: input.text, links: input.links, updatedAt: new Date() } });
+          // A concurrent first save created the stage meanwhile: update it only while still editable.
+          .onConflictDoUpdate({
+            target: [residencyStages.programEnrollmentId, residencyStages.position],
+            set: { text: input.text, links: input.links, updatedAt: new Date() },
+            setWhere: inArray(residencyStages.status, ['draft', 'changes_requested']),
+          })
+          .returning({ id: residencyStages.id });
+        if (!saved) throw conflict('stage_locked', 'This stage is with faculty for review.');
       }
     });
     return this.view(ctx);
