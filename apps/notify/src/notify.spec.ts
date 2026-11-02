@@ -43,8 +43,17 @@ describe('notification email', () => {
     expect(m.html).not.toContain('<script>');
     expect(m.html).toContain('&lt;script&gt; tags &amp; see<br>next line');
     expect(m.html).toContain('href="https://learn.test/learn/a/b"');
-    expect(m.text).toContain('Open it: https://learn.test/learn/a/b');
+    expect(m.text).toContain('See your result: https://learn.test/learn/a/b');
     expect(m.text).toContain('https://learn.test/app/account#notifications');
+  });
+
+  it('names the button for where it leads and labels the category', () => {
+    const grade = notificationEmail('t@example.com', 'Tunde', { category: 'submissions', title: 'New work', body: 'v2', link: '/app/grading/x' }, 'https://learn.test');
+    expect(grade.html).toContain('>Grade the work</a>');
+    expect(grade.html).toContain('Work to review');
+    const plain = notificationEmail('t@example.com', 'Tunde', { title: 'Hello', body: 'No link', link: null }, 'https://learn.test');
+    expect(plain.html).not.toContain('href="https://learn.test/app/grading');
+    expect(plain.text).toContain('Hi Tunde,');
   });
 });
 

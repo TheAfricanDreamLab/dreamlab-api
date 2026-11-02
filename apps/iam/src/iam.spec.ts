@@ -4,6 +4,7 @@ import { isAncestorOrSelf } from './modules/authz/utils/unit-path';
 import { emailProvider, escapeHtml, parseFrom, ZeptoMailEmailSender } from '@lib/email';
 import { channelFor } from './modules/notifications/utils/channel-for';
 import { maskDestination } from './modules/notifications/utils/mask-destination';
+import { ChannelNotifier } from './modules/notifications/notifier.service';
 import { pickSlug, slugify } from './modules/organizations/utils/slug';
 
 describe('org unit paths', () => {
@@ -107,5 +108,33 @@ describe('organisation slugs', () => {
     const taken = new Set(['acme', 'acme-2']);
     await expect(pickSlug('Acme', async (c) => new Set(c.filter((s) => taken.has(s))))).resolves.toBe('acme-3');
     await expect(pickSlug('Fresh Co', async () => new Set())).resolves.toBe('fresh-co');
+  });
+});
+
+describe('IAM emails', () => {
+  const sent: { subject: string; text: string; html: string }[] = [];
+  const notifier = new ChannelNotifier(
+    { name: 'capture', send: async (m) => void sent.push(m) },
+    { name: 'console', send: async () => undefined },
+    { PUBLIC_APP_URL: 'https://learn.test', NODE_ENV: 'test' } as never,
+  );
+
+  it('show a code large in both versions, with the expiry', async () => {
+    await notifier.sendOtp({ channel: 'email', destination: 'a@example.com', code: '482913', purpose: 'login', expiresInSeconds: 600 });
+    const m = sent.pop()!;
+    expect(m.subject).toBe('Your sign-in code for The African Dream Lab');
+    expect(m.html).toContain('>482913</td>');
+    expect(m.text).toContain('Your code: 482913');
+    expect(m.text).toContain('It expires in 10 minutes.');
+    expect(m.html).toContain('https://learn.test/brand/adn-logo.png');
+  });
+
+  it('invite with a button and an escaped organisation name', async () => {
+    await notifier.sendInvitation({ channel: 'email', destination: 'a@example.com', orgName: 'A&B <Hub>', inviterName: 'Halima', acceptUrl: 'https://learn.test/invitations/accept?token=t', expiresAt: new Date('2026-11-08T12:00:00Z') });
+    const m = sent.pop()!;
+    expect(m.subject).toBe('Halima invited you to join A&B <Hub>');
+    expect(m.html).toContain('Join A&amp;B &lt;Hub&gt;');
+    expect(m.html).toContain('href="https://learn.test/invitations/accept?token=t"');
+    expect(m.text).toContain('expires on 8 November 2026');
   });
 });

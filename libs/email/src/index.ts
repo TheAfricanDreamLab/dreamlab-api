@@ -8,6 +8,7 @@ import { ZeptoMailEmailSender } from './zeptomail.email-sender';
 export * from './console.email-sender';
 export * from './email-sender.interface';
 export * from './escape-html';
+export * from './layout';
 export * from './parse-from';
 export * from './post-json';
 export * from './resend.email-sender';

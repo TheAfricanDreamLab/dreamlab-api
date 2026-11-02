@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type { OtpPurpose } from '@dreamlab/contracts';
 import { AppException } from '@lib/common';
 import { CONFIG } from '@lib/config';
-import { escapeHtml, type EmailSender } from '@lib/email';
+import { type EmailSender, renderEmail } from '@lib/email';
 import type { IamConfig } from '../../config';
 import type { InvitationMessage, Notifier, OtpMessage } from './interfaces/notifier.interface';
 import type { SmsSender } from './providers/sms-sender.interface';
@@ -11,11 +11,36 @@ export const NOTIFIER = Symbol('NOTIFIER');
 export const EMAIL_SENDER = Symbol('EMAIL_SENDER');
 export const SMS_SENDER = Symbol('SMS_SENDER');
 
-const PURPOSE_TEXT: Record<OtpPurpose, { subject: string; line: string }> = {
-  verify: { subject: 'Your Dream Lab verification code', line: 'Use this code to verify your account' },
-  login: { subject: 'Your Dream Lab sign-in code', line: 'Use this code to sign in' },
-  reset: { subject: 'Your Dream Lab password reset code', line: 'Use this code to reset your password' },
+/** Email copy for each kind of one-time code; `line` is also the SMS wording. */
+const PURPOSE_TEXT: Record<OtpPurpose, { subject: string; heading: string; intro: string; ignore: string; reason: string; line: string }> = {
+  verify: {
+    subject: 'Confirm your email for The African Dream Lab',
+    heading: 'Confirm it’s you',
+    intro: 'Welcome to The African Dream Lab. Enter this code to finish creating your account.',
+    ignore: 'If you didn’t sign up, ignore this email: no account is created without the code.',
+    reason: 'You’re getting this because this address was used to sign up.',
+    line: 'Use this code to verify your account',
+  },
+  login: {
+    subject: 'Your sign-in code for The African Dream Lab',
+    heading: 'Your sign-in code',
+    intro: 'Enter this code to sign in to The African Dream Lab.',
+    ignore: 'If you didn’t try to sign in, ignore this email and nobody gets in. You may want to change your password.',
+    reason: 'You’re getting this because someone asked to sign in with this address.',
+    line: 'Use this code to sign in',
+  },
+  reset: {
+    subject: 'Reset your password for The African Dream Lab',
+    heading: 'Reset your password',
+    intro: 'Enter this code to choose a new password for your account.',
+    ignore: 'If you didn’t ask to reset it, ignore this email: your password stays the same.',
+    reason: 'You’re getting this because someone asked to reset the password for this address.',
+    line: 'Use this code to reset your password',
+  },
 };
+
+/** "8 November 2026", in UTC like the rest of the server. */
+const longDate = (d: Date) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(d);
 
 @Injectable()
 export class ChannelNotifier implements Notifier {
@@ -33,24 +58,37 @@ export class ChannelNotifier implements Notifier {
     if (m.channel !== 'email') {
       return this.sms(m.destination, `The African Dream Lab: ${t.line.toLowerCase()}: ${m.code}. It expires in ${minutes} minutes. Never share it.`, m.channel);
     }
-    await this.deliver({
-      to: m.destination,
-      subject: t.subject,
-      text: `${t.line}: ${m.code}\n\nIt expires in ${minutes} minutes. If you did not ask for it, ignore this email. Never share this code.`,
-      html: `<p>${t.line}:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${m.code}</p><p>It expires in ${minutes} minutes. If you did not ask for it, ignore this email. Never share this code.</p>`,
+    const body = renderEmail({
+      appUrl: this.config.PUBLIC_APP_URL,
+      preview: `Your code is ${m.code}. It expires in ${minutes} minutes.`,
+      heading: t.heading,
+      paragraphs: [t.intro],
+      code: m.code,
+      note: `It expires in ${minutes} minutes. Never share it: nobody from The African Dream Lab will ask you for it. ${t.ignore}`,
+      reason: t.reason,
     });
+    await this.deliver({ to: m.destination, subject: t.subject, ...body });
   }
 
   async sendInvitation(m: InvitationMessage): Promise<void> {
     const who = m.inviterName ? `${m.inviterName} invited you` : 'You have been invited';
-    const line = `${who} to join ${m.orgName} on Dream Lab.`;
+    const line = `${who} to join ${m.orgName} on The African Dream Lab.`;
     if (m.channel === 'sms') return this.sms(m.destination, `${line} Accept: ${m.acceptUrl}`, 'sms');
-    await this.deliver({
-      to: m.destination,
-      subject: `Join ${m.orgName} on Dream Lab`,
-      text: `${line}\n\nAccept the invitation: ${m.acceptUrl}\n\nIt expires on ${m.expiresAt.toUTCString()}.`,
-      html: `<p>${escapeHtml(line)}</p><p><a href="${escapeHtml(m.acceptUrl)}">Accept the invitation</a></p><p>It expires on ${escapeHtml(m.expiresAt.toUTCString())}.</p>`,
+    const body = renderEmail({
+      appUrl: this.config.PUBLIC_APP_URL,
+      preview: `${who} to join ${m.orgName}. Accept by ${longDate(m.expiresAt)}.`,
+      eyebrow: 'Invitation',
+      heading: `Join ${m.orgName}`,
+      paragraphs: [
+        `${who} to join ${m.orgName} on The African Dream Lab, where you’ll learn, build and work together.`,
+        'Accepting takes a minute: sign in, or create a free account with this email address.',
+      ],
+      button: { label: 'Accept the invitation', url: m.acceptUrl },
+      note: `This invitation expires on ${longDate(m.expiresAt)}. If you weren’t expecting it, you can ignore this email.`,
+      reason: `You’re getting this because someone at ${m.orgName} invited this address.`,
     });
+    const subject = m.inviterName ? `${m.inviterName} invited you to join ${m.orgName}` : `You’re invited to join ${m.orgName}`;
+    await this.deliver({ to: m.destination, subject, ...body });
   }
 
   private async deliver(message: Parameters<EmailSender['send']>[0]): Promise<void> {

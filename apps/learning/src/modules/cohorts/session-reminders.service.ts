@@ -55,18 +55,23 @@ export class SessionRemindersService implements OnApplicationBootstrap, OnApplic
           )
           .returning();
         if (!session) return;
-        const [cohort] = await tx.select({ name: cohorts.name }).from(cohorts).where(eq(cohorts.id, session.cohortId));
+        const [cohort] = await tx.select({ name: cohorts.name, timeZone: cohorts.timeZone }).from(cohorts).where(eq(cohorts.id, session.cohortId));
         const learners = await tx
           .select({ userId: programEnrollments.userId })
           .from(programEnrollments)
           .where(and(eq(programEnrollments.cohortId, session.cohortId), eq(programEnrollments.status, 'active')));
         if (learners.length === 0) return;
         const where = session.mode === 'virtual' ? 'online' : (session.location ?? 'in person');
+        // The class's own time zone, the way its learners read the calendar: "Tuesday 3 November at 21:00 (Africa/Lagos)".
+        const timeZone = cohort?.timeZone ?? 'UTC';
+        const when = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
+          .format(session.startsAt)
+          .replace(/ at |, (?=\d{2}:)/, ' at ');
         await requestNotification(this.outbox, tx, {
           to: { userIds: learners.map((l) => l.userId) },
           category: 'sessions',
           title: `Tomorrow: ${session.title}`,
-          body: `${cohort?.name ?? 'Your cohort'} meets ${where} at ${session.startsAt.toISOString().slice(11, 16)} UTC on ${session.startsAt.toISOString().slice(0, 10)} for ${session.durationMin} minutes.`,
+          body: `${cohort?.name ?? 'Your cohort'} meets ${where} on ${when} (${timeZone}) for ${session.durationMin} minutes.${session.mode === 'virtual' ? ' The room opens 15 minutes before the class starts.' : ''}`,
           link: '/app/programme',
           orgId: session.hostOrgId,
           key: `session-reminder:${session.id}:${session.startsAt.toISOString()}`,
