@@ -310,7 +310,8 @@ export class AdmissionsService {
             to: { userIds: [app.userId] },
             category: 'admissions',
             title: 'Your admissions interview',
-            body: `Your interview is scheduled for ${scheduledAt.slice(0, 16).replace('T', ' ')} UTC.`,
+            // Lagos time, as on the application page.
+            body: `Your interview is on ${new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Africa/Lagos' }).format(new Date(scheduledAt))}, Lagos time. Your application page has the details.`,
             link: `/app/apply/${app.id}`,
             orgId: app.orgId,
             key: `interview:${app.id}:${scheduledAt}`,
