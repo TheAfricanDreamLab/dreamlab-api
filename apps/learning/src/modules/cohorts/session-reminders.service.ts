@@ -62,9 +62,10 @@ export class SessionRemindersService implements OnApplicationBootstrap, OnApplic
           .where(and(eq(programEnrollments.cohortId, session.cohortId), eq(programEnrollments.status, 'active')));
         if (learners.length === 0) return;
         const where = session.mode === 'virtual' ? 'online' : (session.location ?? 'in person');
-        // The class's own time zone, the way its learners read the calendar: "Tuesday 3 November at 21:00 (Africa/Lagos)".
+        // The class's own time zone, the way its learners read the calendar, with the offset so a time
+        // repeated when clocks change is still clear: "Tuesday 3 November at 21:00 GMT+1 (Africa/Lagos)".
         const timeZone = cohort?.timeZone ?? 'UTC';
-        const when = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
+        const when = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset', timeZone })
           .format(session.startsAt)
           .replace(/ at |, (?=\d{2}:)/, ' at ');
         await requestNotification(this.outbox, tx, {
