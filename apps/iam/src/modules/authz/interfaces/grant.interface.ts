@@ -12,4 +12,6 @@ export interface Grant {
 export interface OrgAccess {
   membershipId: string;
   grants: Grant[];
+  /** The organisation awaits platform approval: grants are cut to IN_REVIEW_PERMISSIONS. */
+  orgPending?: boolean;
 }

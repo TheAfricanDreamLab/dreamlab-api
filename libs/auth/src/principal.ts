@@ -1,5 +1,6 @@
 import {
   AccessTokenClaims,
+  IN_REVIEW_PERMISSIONS,
   MFA_PROTECTED_PERMISSIONS,
   PERMISSIONS,
   Permission,
@@ -23,6 +24,8 @@ export interface Principal {
   amr: string[];
   /** The active context requires a second factor for admin permissions. */
   mfaRequired: boolean;
+  /** The active organisation awaits platform approval: only IN_REVIEW_PERMISSIONS apply. */
+  orgPending?: boolean;
   /**
    * The user's roles changed after this token was issued. Its role claims can no longer be
    * trusted, so permissions are re-checked with IAM instead of read from the token.
@@ -43,6 +46,7 @@ export function principalFromClaims(claims: AccessTokenClaims): Principal {
     expiresAt: claims.exp,
     amr: claims.amr ?? [],
     mfaRequired: claims.mfr ?? false,
+    orgPending: claims.opd ?? false,
   };
 }
 
@@ -52,10 +56,11 @@ export function needsMfa(principal: Pick<Principal, 'amr' | 'mfaRequired'>, perm
 }
 
 /** Permissions the principal holds across its whole active organisation. */
-export function orgPermissions(principal: Pick<Principal, 'roles' | 'platformAdmin' | 'orgId'>): Set<Permission> {
+export function orgPermissions(principal: Pick<Principal, 'roles' | 'platformAdmin' | 'orgId' | 'orgPending'>): Set<Permission> {
   if (principal.platformAdmin) return new Set(PERMISSIONS);
   if (!principal.orgId) return new Set();
-  return new Set(principal.roles.flatMap((r) => [...permissionsForRole(r)]));
+  const held = principal.roles.flatMap((r) => [...permissionsForRole(r)]);
+  return new Set(principal.orgPending ? held.filter((p) => IN_REVIEW_PERMISSIONS.includes(p)) : held);
 }
 
 export function hasOrgPermission(principal: Principal, permission: Permission): boolean {
