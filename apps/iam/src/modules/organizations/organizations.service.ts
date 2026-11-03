@@ -207,17 +207,16 @@ export class OrganizationsService {
         requestId: meta.requestId,
         payload: { orgId, slug: row.slug, changed: Object.keys(dto) },
       });
+      // Approving, suspending or reactivating changes what every member may do there (an organisation
+      // in review only grants set-up permissions): their tokens are re-checked from now on, committed
+      // together with the status.
+      if (dto.status) {
+        const members = await tx.select({ userId: schema.memberships.userId }).from(schema.memberships).where(eq(schema.memberships.orgId, orgId));
+        await this.authz.bumpVersion(tx, members.map((m) => m.userId));
+      }
       return row;
     });
     if (!org) throw notFound('org_not_found', 'Organisation not found');
-    // Approving, suspending or reactivating changes what every member may do there (an organisation in
-    // review only grants set-up permissions): their tokens are re-checked from now on.
-    if (dto.status) {
-      await this.db.system(async (tx) => {
-        const members = await tx.select({ userId: schema.memberships.userId }).from(schema.memberships).where(eq(schema.memberships.orgId, orgId));
-        await this.authz.bumpVersion(tx, members.map((m) => m.userId));
-      });
-    }
     return toOrganization(org);
   }
 
