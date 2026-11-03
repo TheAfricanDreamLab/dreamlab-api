@@ -636,8 +636,16 @@ export class CohortsService {
 
   /** Runs the cohort: cohort.manage in its host organisation (platform admins too). */
   async isCohortManager(p: Principal, cohort: CohortRow): Promise<boolean> {
+    return this.isOrgManager(p, cohort.hostOrgId);
+  }
+
+  /**
+   * cohort.manage in this organisation, from a built-in role or one of its custom roles (IAM), or a
+   * platform admin. Graduating and revoking credentials use this one rule.
+   */
+  async isOrgManager(p: Principal, orgId: string | null): Promise<boolean> {
     if (p.platformAdmin && !p.stale) return true;
-    return cohort.hostOrgId === p.orgId && this.may(p, cohort.hostOrgId, "cohort.manage");
+    return !!orgId && orgId === p.orgId && this.may(p, orgId, "cohort.manage");
   }
 
   /**
