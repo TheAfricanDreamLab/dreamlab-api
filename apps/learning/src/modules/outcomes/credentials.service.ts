@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import type { Credential } from '@dreamlab/contracts';
-import { hasOrgPermission, type Principal } from '@lib/auth';
+import type { Principal } from '@lib/auth';
 import { forbidden, newId, notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { LearningDatabase, LearningTx, schema } from '../../database';
+import { CohortsService } from '../cohorts/cohorts.service';
 import { ProgressService } from './progress.service';
 
 const { credentials } = schema;
@@ -40,6 +41,7 @@ export class CredentialsService {
   constructor(
     @InjectDatabase() private readonly db: LearningDatabase,
     private readonly progress: ProgressService,
+    private readonly cohorts: CohortsService,
   ) {}
 
   /** Issues once per achievement, in the caller's transaction: issuing again returns the first. */
@@ -91,8 +93,8 @@ export class CredentialsService {
   async revoke(p: Principal, code: string, reason: string): Promise<Credential> {
     const [row] = await this.db.sys.select().from(credentials).where(eq(credentials.code, code));
     if (!row) throw notFound('credential_not_found', 'Credential not found');
-    const allowed = (p.platformAdmin && !p.stale) || (!!row.issuerOrgId && row.issuerOrgId === p.orgId && hasOrgPermission(p, 'cohort.manage'));
-    if (!allowed) throw forbidden('permission_denied', 'Only the issuing organisation’s managers can revoke this credential.');
+    // The same rule the graduation record uses to offer revocation, custom roles included.
+    if (!(await this.cohorts.isOrgManager(p, row.issuerOrgId))) throw forbidden('permission_denied', 'Only the issuing organisation’s managers can revoke this credential.');
     if (row.revokedAt) return toCredential(row);
     const [updated] = await this.db.system((tx) =>
       tx.update(credentials).set({ revokedAt: new Date(), revokedReason: reason, revokedByUserId: p.userId }).where(eq(credentials.id, row.id)).returning(),

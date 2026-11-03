@@ -136,6 +136,8 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
   let teacher: string;
   let learner: string;
   let outsider: string;
+  /** Runs cohorts through a custom role (cohort.manage), not a built-in one. */
+  let registrar: string;
   let orgId: string;
   let enrollmentId: string;
   let learnerId: string;
@@ -162,6 +164,9 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
       expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email, roleKeys: [role] } })).status).toBe(201);
     }
     teacher = await tokenFor('teacher@ibadan-lab.test', 'Tolu Teacher');
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/roles`, { token: owner, body: { key: 'registrar', name: 'Registrar', permissions: ['org.read', 'cohort.manage'] } })).status).toBe(201);
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email: 'registrar@ibadan-lab.test', roleKeys: ['registrar'] } })).status).toBe(201);
+    registrar = await tokenFor('registrar@ibadan-lab.test', 'Remi Registrar');
     learner = await tokenFor('learner@ibadan-lab.test', 'Lara Learner');
     outsider = await signUp('outsider@outcomes.test', 'Odun Outsider');
     cohort = (await request(learning, 'POST', '/v1/learning/cohorts', { ...L(owner), body: { programSlug: 'the-african-dream-lab', name: 'Ibadan 01', startsOn: todayIn('Africa/Lagos') } })).body as CohortDetail;
@@ -255,8 +260,9 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
     const graduated = (await request(learning, 'POST', `${base()}/graduate`, L(owner))).body as Graduation;
     expect(graduated.graduatedAt).not.toBeNull();
     expect(graduated.credentialCode).toMatch(/^DL-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/);
-    // Only the cohort's managers may revoke it: the owner, not the learner or the teacher.
+    // Only the cohort's managers may revoke it: the owner, or a custom role with cohort.manage; not the learner or the teacher.
     expect(graduated).toMatchObject({ credentialRevoked: null, can: { revokeCredential: true } });
+    expect(((await request(learning, 'GET', `${base()}/graduation`, L(registrar))).body as Graduation).can.revokeCredential).toBe(true);
     expect(((await request(learning, 'GET', `${base()}/graduation`, L(learner))).body as Graduation).can.revokeCredential).toBe(false);
     expect(((await request(learning, 'GET', `${base()}/graduation`, L(teacher))).body as Graduation).can.revokeCredential).toBe(false);
     // Graduating again changes nothing; confirmations are closed.
@@ -270,7 +276,8 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
     expect((await request(learning, 'GET', '/v1/learning/credentials/DL-AAAA-BBBB-CCCC')).status).toBe(404);
 
     expect((await request(learning, 'POST', `/v1/learning/credentials/${code}/revoke`, { ...L(learner), body: { reason: 'Mistake in records' } })).status).toBe(403);
-    expect((await request(learning, 'POST', `/v1/learning/credentials/${code}/revoke`, { ...L(owner), body: { reason: 'Issued in error' } })).body).toMatchObject({ revoked: { reason: 'Issued in error' } });
+    // Offered to the custom role above, so the endpoint must accept it too.
+    expect((await request(learning, 'POST', `/v1/learning/credentials/${code}/revoke`, { ...L(registrar), body: { reason: 'Issued in error' } })).body).toMatchObject({ revoked: { reason: 'Issued in error' } });
     expect(((await request(learning, 'GET', `/v1/learning/credentials/${code}`)).body as Credential).revoked).toMatchObject({ reason: 'Issued in error' });
     // The graduation record shows the revocation to the learner and the managers, and offers no second revoke.
     for (const who of [learner, owner]) {
