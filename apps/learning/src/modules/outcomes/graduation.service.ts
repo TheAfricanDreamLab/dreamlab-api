@@ -192,7 +192,13 @@ export class GraduationService {
       eligible,
       graduatedAt: ctx.pe.graduatedAt?.toISOString() ?? null,
       credentialCode: credential && !credential.revokedAt ? credential.code : null,
-      can: { confirm: ctx.isFaculty && !graduated, graduate: ctx.isManager && eligible && !graduated },
+      credentialRevoked: credential?.revokedAt ? { at: credential.revokedAt.toISOString(), reason: credential.revokedReason ?? '' } : null,
+      can: {
+        confirm: ctx.isFaculty && !graduated,
+        graduate: ctx.isManager && eligible && !graduated,
+        // The same rule as CredentialsService.revoke: the host organisation's managers.
+        revokeCredential: ctx.isManager && !!credential && !credential.revokedAt,
+      },
     };
   }
 }

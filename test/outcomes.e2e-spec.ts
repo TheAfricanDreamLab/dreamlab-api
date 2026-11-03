@@ -240,7 +240,7 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
   it('graduates only once faculty confirm every requirement, and issues a checkable credential', async () => {
     const before = (await request(learning, 'GET', `${base()}/graduation`, L(learner))).body as Graduation;
     expect(before.requirements).toHaveLength(10);
-    expect(before).toMatchObject({ eligible: false, graduatedAt: null, can: { confirm: false, graduate: false } });
+    expect(before).toMatchObject({ eligible: false, graduatedAt: null, credentialRevoked: null, can: { confirm: false, graduate: false, revokeCredential: false } });
     expect(before.requirements.find((r) => r.key === 'post_lab_action_plan')).toMatchObject({ evidence: 'Approved', evidenceMet: true });
     expect(before.requirements.find((r) => r.key === 'residency_completion')).toMatchObject({ evidence: '1 of 7 residency stages approved', evidenceMet: false });
 
@@ -255,6 +255,10 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
     const graduated = (await request(learning, 'POST', `${base()}/graduate`, L(owner))).body as Graduation;
     expect(graduated.graduatedAt).not.toBeNull();
     expect(graduated.credentialCode).toMatch(/^DL-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/);
+    // Only the cohort's managers may revoke it: the owner, not the learner or the teacher.
+    expect(graduated).toMatchObject({ credentialRevoked: null, can: { revokeCredential: true } });
+    expect(((await request(learning, 'GET', `${base()}/graduation`, L(learner))).body as Graduation).can.revokeCredential).toBe(false);
+    expect(((await request(learning, 'GET', `${base()}/graduation`, L(teacher))).body as Graduation).can.revokeCredential).toBe(false);
     // Graduating again changes nothing; confirmations are closed.
     expect(((await request(learning, 'POST', `${base()}/graduate`, L(owner))).body as Graduation).credentialCode).toBe(graduated.credentialCode);
     expect((await request(learning, 'PUT', `${base()}/graduation/final_assessment`, { ...L(teacher), body: { confirmed: false } })).status).toBe(409);
@@ -268,6 +272,10 @@ describe('outcomes (CAP-1, GRAD-1, PORT-1, CRED-1)', () => {
     expect((await request(learning, 'POST', `/v1/learning/credentials/${code}/revoke`, { ...L(learner), body: { reason: 'Mistake in records' } })).status).toBe(403);
     expect((await request(learning, 'POST', `/v1/learning/credentials/${code}/revoke`, { ...L(owner), body: { reason: 'Issued in error' } })).body).toMatchObject({ revoked: { reason: 'Issued in error' } });
     expect(((await request(learning, 'GET', `/v1/learning/credentials/${code}`)).body as Credential).revoked).toMatchObject({ reason: 'Issued in error' });
+    // The graduation record shows the revocation to the learner and the managers, and offers no second revoke.
+    for (const who of [learner, owner]) {
+      expect((await request(learning, 'GET', `${base()}/graduation`, L(who))).body).toMatchObject({ credentialCode: null, credentialRevoked: { reason: 'Issued in error' }, can: { revokeCredential: false } });
+    }
   });
 
   it('gives a course certificate once per completed course enrolment', async () => {
