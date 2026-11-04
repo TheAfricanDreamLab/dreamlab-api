@@ -10,6 +10,7 @@ const EYEBROW: Record<NotificationCategory, string> = {
   authoring: 'Course authoring',
   admissions: 'Admissions',
   community: 'Mentors and circles',
+  circles: 'Your Dream Circle',
   account: 'Your account',
 };
 
@@ -25,6 +26,8 @@ const ACTIONS: [RegExp, string][] = [
   [/^\/app\/programme\/[^/]+\/(action-plan|residency)/, 'Open it'],
   [/^\/app\/programme/, 'Open My programme'],
   [/^\/app\/mentoring/, 'Open Mentoring'],
+  [/^\/app\/circles\/[^/]+\/call/, 'Join the call'],
+  [/^\/app\/circles\//, 'Open the circle'],
   [/^\/app\/credentials/, 'See your credential'],
 ];
 

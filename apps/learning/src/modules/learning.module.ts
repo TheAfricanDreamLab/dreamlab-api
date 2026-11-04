@@ -4,6 +4,7 @@ import { CATALOG_RPC_QUEUE, CatalogClient, IAM_USERS_QUEUE, RpcClient } from '@l
 import { MeetKit } from '@lib/meet-kit';
 import { BlobStorage } from '@lib/storage';
 import { CircleSpaceController, CommunityController, LiveController, MeetingWebhookController } from './community/community.controller';
+import { CircleSchedulerService } from './community/circle-scheduler.service';
 import { CircleSpaceService } from './community/circle-space.service';
 import { CommunityService } from './community/community.service';
 import { LiveService, MEET_KIT } from './community/live.service';
@@ -41,6 +42,7 @@ import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
     LiveService,
     CommunityService,
     CircleSpaceService,
+    CircleSchedulerService,
     { provide: MEET_KIT, inject: [CONFIG], useFactory: (c: LearningConfig) => new MeetKit(c) },
     FilesService,
     { provide: STORAGE, inject: [CONFIG], useFactory: (c: LearningConfig) => new BlobStorage(c) },

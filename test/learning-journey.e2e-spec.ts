@@ -60,6 +60,7 @@ import { learningConfigSchema } from '../apps/learning/src/config';
 import { learningMigrationsFolder } from '../apps/learning/src/database';
 import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
 import { SessionRemindersService } from '../apps/learning/src/modules/cohorts/session-reminders.service';
+import { CircleSchedulerService } from '../apps/learning/src/modules/community/circle-scheduler.service';
 import { MEET_KIT } from '../apps/learning/src/modules/community/live.service';
 import { FilesService, STORAGE } from '../apps/learning/src/modules/files/files.service';
 import { AdmissionsAppModule } from '../apps/admissions/src/app.module';
@@ -1361,6 +1362,83 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     expect(await storage.stat('private', path)).not.toBeNull();
     expect((await request(learning, 'DELETE', `/v1/learning/circles/${brief.id}`, L(owner))).status).toBe(204);
     expect(await storage.stat('private', path)).toBeNull();
+  });
+
+  it('shares contacts only by choice, schedules meetups with reminders and tells the circle what happens (COMM-3)', async () => {
+    const circleId = ((await request(learning, 'GET', '/v1/learning/me/community', L(bayo))).body as MyCommunity).circles[0]!.id;
+    const base = `/v1/learning/circles/${circleId}`;
+    const space = async (token: string) => (await request(learning, 'GET', `${base}/space`, L(token))).body as CircleSpace;
+
+    // Nothing is shared until someone chooses to share it.
+    expect((await space(ada)).members.map((m) => m.contact)).toEqual([null, null, null]);
+    expect((await request(learning, 'PUT', `${base}/contact`, { ...L(ada), body: { linkedin: 'https://evil.example/in/ada' } })).status).toBe(400);
+    const shared = await request(learning, 'PUT', `${base}/contact`, { ...L(ada), body: { email: 'ada@circle.test', phone: '+2348012345678', whatsapp: true } });
+    expect(shared).toMatchObject({ status: 200, body: { email: 'ada@circle.test', phone: '+2348012345678', whatsapp: true, linkedin: null } });
+    expect((await space(bayo)).members.find((m) => m.name === 'Ada Eze')!.contact).toMatchObject({ email: 'ada@circle.test', whatsapp: true });
+    expect((await space(ada)).you.contact).toMatchObject({ phone: '+2348012345678' });
+    // Cohort staff can open the circle, but contact details stay within it.
+    expect((await space(owner)).members.find((m) => m.name === 'Ada Eze')!.contact).toBeNull();
+    // WhatsApp needs a number; staff are not listed in the circle, so they share nothing here.
+    expect((await request(learning, 'PUT', `${base}/contact`, { ...L(bayo), body: { whatsapp: true } })).body).toEqual({ email: null, phone: null, whatsapp: false, linkedin: null });
+    expect((await space(ada)).members.find((m) => m.name === 'Bayo Ade')!.contact).toBeNull();
+    expect((await request(learning, 'PUT', `${base}/contact`, { ...L(owner), body: { email: 'owner@circle.test' } })).status).toBe(403);
+    expect((await request(learning, 'PUT', `${base}/contact`, { ...L(outsider), body: {} })).status).toBe(404);
+    // Clearing the form stops sharing.
+    expect((await request(learning, 'PUT', `${base}/contact`, { ...L(ada), body: {} })).status).toBe(200);
+    expect((await space(bayo)).members.find((m) => m.name === 'Ada Eze')!.contact).toBeNull();
+
+    // Meetups: anyone in the circle schedules one; online ones use the circle call.
+    const inHalfAnHour = new Date(Date.now() + 30 * 60_000).toISOString();
+    const inThreeHours = new Date(Date.now() + 3 * 3_600_000).toISOString();
+    expect((await request(learning, 'POST', `${base}/meetups`, { ...L(bayo), body: { title: 'Too late', startsAt: new Date(Date.now() - 3_600_000).toISOString() } })).status).toBe(400);
+    expect((await request(learning, 'POST', `${base}/meetups`, { ...L(bayo), body: { title: 'Nowhere', startsAt: inThreeHours, mode: 'physical' } })).status).toBe(400);
+    const soon = await request(learning, 'POST', `${base}/meetups`, { ...L(bayo), body: { title: 'Pitch practice', startsAt: inHalfAnHour } });
+    expect(soon).toMatchObject({ status: 201, body: { mode: 'virtual', location: null, durationMin: 60, createdBy: { name: 'Bayo Ade' }, can: { cancel: true } } });
+    const walk = await request(learning, 'POST', `${base}/meetups`, {
+      ...L(ada),
+      body: { title: 'Market walk', startsAt: inThreeHours, mode: 'physical', location: 'Ogbete Market', durationMin: 90 },
+    });
+    expect(walk.status).toBe(201);
+    const walkId = (walk.body as { id: string }).id;
+    expect((await space(mentor)).meetups.map((m) => `${m.title}:${m.can.cancel}`)).toEqual(['Pitch practice:true', 'Market walk:true']);
+    expect((await space(ada)).meetups.map((m) => `${m.title}:${m.can.cancel}`)).toEqual(['Pitch practice:false', 'Market walk:true']);
+    expect((await request(learning, 'DELETE', `/v1/learning/circle-meetups/${(soon.body as { id: string }).id}`, L(ada))).status).toBe(403);
+    await notificationsFor(ada, (n) => n.category === 'circles' && n.title === 'Bayo Ade set up a meetup: Pitch practice');
+    await notificationsFor(mentor, (n) => n.title === 'Ada Eze set up a meetup: Market walk' && n.body.includes('Ogbete Market'));
+
+    // Reminders go out an hour ahead, once. One set up within the hour was its own reminder.
+    const scheduler = learning.get(CircleSchedulerService);
+    expect(await scheduler.remind()).toBe(0);
+    const walkHour = new Date(Date.parse(inThreeHours) - 50 * 60_000);
+    expect(await scheduler.remind(walkHour)).toBe(1);
+    expect(await scheduler.remind(walkHour)).toBe(0);
+    await notificationsFor(bayo, (n) => n.title === 'Soon: Market walk');
+
+    // A mentor cancels; the circle is told, and the meetup leaves the space.
+    expect((await request(learning, 'DELETE', `/v1/learning/circle-meetups/${walkId}`, L(mentor))).status).toBe(204);
+    await notificationsFor(ada, (n) => n.title === 'Cancelled: Market walk');
+    expect((await space(ada)).meetups.map((m) => m.title)).toEqual(['Pitch practice']);
+
+    // Posts reach the circle and its mentors; replies reach the thread; the earlier call reached everyone.
+    await notificationsFor(ada, (n) => n.category === 'circles' && n.title.endsWith('started a call in Circle A') && n.link === `/app/circles/${circleId}/call`);
+    expect((await request(notify, 'PUT', '/v1/notifications/preferences', { ...L(ada), body: { email: { circles: false } } })).body).toMatchObject({ email: { circles: false, community: true } });
+    const postEmails = (address: string) => mail.to(address).filter((m) => m.subject.includes('Bayo Ade posted in Circle A')).length;
+    const before = { ada: postEmails('ada@enugu-hub.test'), mentor: postEmails('mentor@enugu-hub.test') };
+    const news =(await request(learning, 'POST', `${base}/posts`, { ...L(bayo), body: { body: 'Demo day is Friday' } })).body as CirclePost;
+    await notificationsFor(ada, (n) => n.title === 'Bayo Ade posted in Circle A' && n.body === 'Demo day is Friday');
+    await notificationsFor(mentor, (n) => n.title === 'Bayo Ade posted in Circle A');
+    expect((await notificationsFor(bayo, () => true)).some((n) => n.title === 'Bayo Ade posted in Circle A')).toBe(false);
+    // Ada switched circle emails off: the mentor's email arrives, hers does not.
+    await eventually(() => postEmails('mentor@enugu-hub.test') > before.mentor);
+    expect(postEmails('ada@enugu-hub.test')).toBe(before.ada);
+    await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { body: 'I will be there', parentId: news.id } });
+    await notificationsFor(bayo, (n) => n.title === 'Ada Eze replied in Circle A' && n.body === 'I will be there');
+
+    // Files uploaded for a post that was never made are tidied away after a day.
+    const orphan = (await request(learning, 'POST', `${base}/uploads`, { ...L(ada), body: { fileName: 'draft.pdf', contentType: 'application/pdf', size: 12 } })).body as CircleUploadTicket;
+    expect(await scheduler.tidy()).toBe(0);
+    expect(await scheduler.tidy(new Date(Date.now() + 25 * 3_600_000))).toBeGreaterThanOrEqual(1);
+    expect((await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { attachmentIds: [orphan.attachmentId] } })).status).toBe(400);
   });
 });
 
