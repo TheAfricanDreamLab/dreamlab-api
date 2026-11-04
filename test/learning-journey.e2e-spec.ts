@@ -1274,6 +1274,7 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     expect((await request(learning, 'GET', `${base}/space`, L(mentor))).status).toBe(404);
     const again = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/mentors`, { ...L(owner), body: { mentorUserId: ids['mentor@enugu-hub.test'], learnerUserIds: [ids['ada@enugu-hub.test']] } });
     expect(again.status).toBe(201);
+    expect((await request(learning, 'GET', '/v1/learning/mentoring', L(mentor))).body).toMatchObject({ circles: [{ id: circleId, name: 'Circle A', cohortName: 'Enugu 01' }] });
 
     // Who may enter: members, the members' mentors, and the cohort's staff; nobody else learns it exists.
     expect((await request(learning, 'GET', `${base}/space`, L(outsider))).status).toBe(404);
