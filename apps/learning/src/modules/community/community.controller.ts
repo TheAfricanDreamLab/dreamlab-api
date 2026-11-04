@@ -1,8 +1,15 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Patch, Post, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   apiV1Contract,
   AssignMentorsSchema,
+  CirclePostPageSchema,
+  CirclePostSchema,
+  CirclePostsQuerySchema,
+  CircleSpaceSchema,
+  CircleUploadRequestSchema,
+  CircleUploadTicketSchema,
+  CreateCirclePostSchema,
   DreamCircleSchema,
   FileLinkSchema,
   JoinTicketSchema,
@@ -22,6 +29,7 @@ import { Authenticated, CurrentPrincipal, Principal, Public, RequirePermission }
 import { badRequest } from '@lib/common';
 import { createZodDto, ZodResponse } from 'nestjs-zod';
 import { z } from 'zod';
+import { CircleSpaceService } from './circle-space.service';
 import { CommunityService } from './community.service';
 import { LiveService } from './live.service';
 
@@ -204,5 +212,73 @@ export class CommunityController {
   @ZodResponse({ status: 200, type: MyCommunityDto })
   mine(@CurrentPrincipal() principal: Principal) {
     return this.community.myCommunity(principal);
+  }
+}
+
+class CircleSpaceDto extends createZodDto(CircleSpaceSchema) {}
+class CirclePostDto extends createZodDto(CirclePostSchema) {}
+class CirclePostPageDto extends createZodDto(CirclePostPageSchema) {}
+class CirclePostsQueryDto extends createZodDto(CirclePostsQuerySchema) {}
+class CreateCirclePostDto extends createZodDto(CreateCirclePostSchema) {}
+class CircleUploadRequestDto extends createZodDto(CircleUploadRequestSchema) {}
+class CircleUploadTicketDto extends createZodDto(CircleUploadTicketSchema) {}
+class CirclePostParamsDto extends createZodDto(z.object({ postId: UuidSchema })) {}
+class PinDto extends createZodDto(z.object({ pinned: z.boolean() })) {}
+
+/** A Dream Circle's own space: its board, uploads and call (COMM-2). The service decides who may enter. */
+@ApiTags('community')
+@Authenticated()
+@Controller('v1/learning')
+export class CircleSpaceController {
+  constructor(private readonly circles: CircleSpaceService) {}
+
+  @Get('circles/:circleId/space')
+  @ApiOperation({ summary: r.circleSpace.summary })
+  @ZodResponse({ status: 200, type: CircleSpaceDto })
+  space(@Param() p: CircleParamsDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.space(principal, p.circleId);
+  }
+
+  @Get('circles/:circleId/posts')
+  @ApiOperation({ summary: r.circlePosts.summary })
+  @ZodResponse({ status: 200, type: CirclePostPageDto })
+  posts(@Param() p: CircleParamsDto, @Query() q: CirclePostsQueryDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.posts(principal, p.circleId, q);
+  }
+
+  @Post('circles/:circleId/posts')
+  @ApiOperation({ summary: r.createCirclePost.summary })
+  @ZodResponse({ status: 201, type: CirclePostDto })
+  createPost(@Param() p: CircleParamsDto, @Body() dto: CreateCirclePostDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.createPost(principal, p.circleId, dto);
+  }
+
+  @Delete('circle-posts/:postId')
+  @HttpCode(204)
+  @ApiOperation({ summary: r.deleteCirclePost.summary })
+  async deletePost(@Param() p: CirclePostParamsDto, @CurrentPrincipal() principal: Principal) {
+    await this.circles.deletePost(principal, p.postId);
+  }
+
+  @Put('circle-posts/:postId/pin')
+  @ApiOperation({ summary: r.pinCirclePost.summary })
+  @ZodResponse({ status: 200, type: CirclePostDto })
+  pin(@Param() p: CirclePostParamsDto, @Body() dto: PinDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.pinPost(principal, p.postId, dto.pinned);
+  }
+
+  @Post('circles/:circleId/uploads')
+  @ApiOperation({ summary: r.circleUpload.summary })
+  @ZodResponse({ status: 201, type: CircleUploadTicketDto })
+  upload(@Param() p: CircleParamsDto, @Body() dto: CircleUploadRequestDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.upload(principal, p.circleId, dto);
+  }
+
+  @Post('circles/:circleId/call')
+  @HttpCode(200)
+  @ApiOperation({ summary: r.joinCircleCall.summary })
+  @ZodResponse({ status: 200, type: JoinTicketDto })
+  call(@Param() p: CircleParamsDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.joinCall(principal, p.circleId);
   }
 }

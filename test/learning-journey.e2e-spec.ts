@@ -23,6 +23,10 @@ import {
   ItemAuthoring,
   ItemView,
   isInteractiveBlock,
+  CirclePost,
+  CirclePostPage,
+  CircleSpace,
+  CircleUploadTicket,
   MyCommunity,
   MyProgram,
   Notification,
@@ -154,6 +158,8 @@ class TestMeetKit extends MeetKit {
   override async join(roomName: string, identity: string, _name: string, role: LiveRole, _emptyTimeoutMin?: number, options: { participantVideo?: boolean } = {}) {
     this.joins.push({ roomName, identity, role, participantVideo: options.participantVideo ?? false });
     return { url: LIVEKIT_ENV.LIVEKIT_URL, token: `test-token-${role}`, roomName, expiresAt: new Date(Date.now() + 3_600_000) };
+  }  override async participantCount() {
+    return 0;
   }
 }
 let meetKit: TestMeetKit;
@@ -1259,6 +1265,76 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     const circles = ((await request(learning, 'GET', '/v1/learning/me/community', L(bayo))).body as MyCommunity).circles;
     expect(circles).toMatchObject([{ name: 'Circle A', cohortName: 'Enugu 01' }]);
     expect(circles[0]!.members.map((m) => m.name).sort()).toEqual(['Ada Eze', 'Bayo Ade']);
+  });
+
+  it('gives a circle its own space: posts, replies, files, links, moderation and a call (COMM-2)', async () => {
+    const circleId = ((await request(learning, 'GET', '/v1/learning/me/community', L(bayo))).body as MyCommunity).circles[0]!.id;
+    const base = `/v1/learning/circles/${circleId}`;
+    // The mentorship above has ended; Ada gets her mentor back, which brings the mentor into the circle.
+    expect((await request(learning, 'GET', `${base}/space`, L(mentor))).status).toBe(404);
+    const again = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/mentors`, { ...L(owner), body: { mentorUserId: ids['mentor@enugu-hub.test'], learnerUserIds: [ids['ada@enugu-hub.test']] } });
+    expect(again.status).toBe(201);
+
+    // Who may enter: members, the members' mentors, and the cohort's staff; nobody else learns it exists.
+    expect((await request(learning, 'GET', `${base}/space`, L(outsider))).status).toBe(404);
+    expect((await request(learning, 'GET', `${base}/space`, L(ada))).body as CircleSpace).toMatchObject({ name: 'Circle A', you: { role: 'member' }, can: { moderate: false }, call: { active: false } });
+    expect((await request(learning, 'GET', `${base}/space`, L(mentor))).body as CircleSpace).toMatchObject({ you: { role: 'mentor' }, can: { moderate: true } });
+    const staffView = (await request(learning, 'GET', `${base}/space`, L(owner))).body as CircleSpace;
+    expect(staffView).toMatchObject({ you: { role: 'staff' }, can: { moderate: true } });
+    expect(staffView.members.map((m) => `${m.name}:${m.role}`)).toEqual(['Ada Eze:member', 'Bayo Ade:member', 'Mma Mentor:mentor']);
+
+    // A post with a picture uploaded straight to storage, and a link to an internal address, which is
+    // never fetched: its preview is the bare link.
+    const ticket = await request(learning, 'POST', `${base}/uploads`, { ...L(ada), body: { fileName: 'idea.png', contentType: 'image/png', size: 9, width: 640, height: 480 } });
+    expect(ticket.status).toBe(201);
+    const { attachmentId, uploadUrl, headers } = ticket.body as CircleUploadTicket;
+    expect((await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { body: 'Too early', attachmentIds: [attachmentId] } })).status).toBe(400);
+    expect((await fetch(uploadUrl, { method: 'PUT', headers, body: Buffer.from('png bytes') })).status).toBe(201);
+    expect((await request(learning, 'POST', `${base}/uploads`, { ...L(ada), body: { fileName: 'x.html', contentType: 'text/html', size: 10 } })).status).toBe(400);
+    expect((await request(learning, 'POST', `${base}/uploads`, { ...L(ada), body: { fileName: 'big.mp4', contentType: 'video/mp4', size: 500 * 1024 * 1024 } })).status).toBe(400);
+    const made = await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { body: 'My prototype, see https://127.0.0.1/admin', attachmentIds: [attachmentId] } });
+    expect(made.status).toBe(201);
+    const post = made.body as CirclePost;
+    expect(post).toMatchObject({
+      author: { name: 'Ada Eze', role: 'member' },
+      links: [{ url: 'https://127.0.0.1/admin', title: null }],
+      attachments: [{ kind: 'image', fileName: 'idea.png', width: 640 }],
+    });
+    expect(post.attachments[0]!.url).toContain('sig=');
+    // A file is used once, by its uploader.
+    expect((await request(learning, 'POST', `${base}/posts`, { ...L(bayo), body: { body: 'Mine now', attachmentIds: [attachmentId] } })).status).toBe(400);
+    expect((await request(learning, 'POST', `${base}/posts`, { ...L(outsider), body: { body: 'Hello?' } })).status).toBe(404);
+
+    // Replies count on their post and read oldest first.
+    const reply = (await request(learning, 'POST', `${base}/posts`, { ...L(bayo), body: { body: 'Looks great', parentId: post.id } })).body as CirclePost;
+    expect((await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { body: 'Nested', parentId: reply.id } })).status).toBe(400);
+    const replies = (await request(learning, 'GET', `${base}/posts?parentId=${post.id}`, L(ada))).body as CirclePostPage;
+    expect(replies.items.map((r) => r.body)).toEqual(['Looks great']);
+
+    // Pages: newest first, with a cursor for older posts.
+    for (const n of [1, 2, 3]) await request(learning, 'POST', `${base}/posts`, { ...L(bayo), body: { body: `Update ${n}` } });
+    const first = (await request(learning, 'GET', `${base}/posts?limit=2`, L(ada))).body as CirclePostPage;
+    expect(first.items.map((x) => x.body)).toEqual(['Update 3', 'Update 2']);
+    const second = (await request(learning, 'GET', `${base}/posts?limit=2&before=${encodeURIComponent(first.nextCursor!)}`, L(ada))).body as CirclePostPage;
+    expect(second.items.map((x) => x.body)).toEqual(['Update 1', 'My prototype, see https://127.0.0.1/admin']);
+    expect(second.items[1]!.replyCount).toBe(1);
+    expect(second.nextCursor).toBeNull();
+
+    // Moderation: members remove only their own posts; mentors and staff pin and remove.
+    expect((await request(learning, 'DELETE', `/v1/learning/circle-posts/${post.id}`, L(bayo))).status).toBe(403);
+    expect((await request(learning, 'PUT', `/v1/learning/circle-posts/${post.id}/pin`, { ...L(ada), body: { pinned: true } })).status).toBe(403);
+    expect((await request(learning, 'PUT', `/v1/learning/circle-posts/${post.id}/pin`, { ...L(mentor), body: { pinned: true } })).body).toMatchObject({ pinned: true });
+    expect(((await request(learning, 'GET', `${base}/posts?limit=2`, L(ada))).body as CirclePostPage).items[0]!.id).toBe(post.id);
+    expect((await request(learning, 'DELETE', `/v1/learning/circle-posts/${reply.id}`, L(bayo))).status).toBe(204);
+    expect(((await request(learning, 'GET', `${base}/posts?parentId=${post.id}`, L(ada))).body as CirclePostPage).items).toEqual([]);
+    expect((await request(learning, 'DELETE', `/v1/learning/circle-posts/${post.id}`, L(owner))).status).toBe(204);
+
+    // The call: everyone may use their camera; mentors and staff host. Never recorded.
+    meetKit.joins.length = 0;
+    expect((await request(learning, 'POST', `${base}/call`, L(bayo))).body).toMatchObject({ role: 'participant', roomName: `dl-e2e-circle-${circleId}` });
+    expect((await request(learning, 'POST', `${base}/call`, L(mentor))).body).toMatchObject({ role: 'host' });
+    expect(meetKit.joins.map((j) => j.participantVideo)).toEqual([true, true]);
+    expect((await request(learning, 'POST', `${base}/call`, L(outsider))).status).toBe(404);
   });
 });
 

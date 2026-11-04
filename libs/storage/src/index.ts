@@ -97,11 +97,15 @@ export class BlobStorage {
     };
   }
 
-  /** A read-only link to a private blob, opened as a download with its original name. */
-  readLink(path: string, fileName: string): { url: string; expiresAt: string } {
+  /**
+   * A read-only link to a private blob, opened as a download with its original name. `inline` lets
+   * pages show it in place (pictures, voice messages, videos), with a longer life (`minutes`) so a
+   * page left open keeps playing.
+   */
+  readLink(path: string, fileName: string, options: { inline?: boolean; minutes?: number } = {}): { url: string; expiresAt: string } {
     const { service, credential } = this.require();
     const container = this.container('private');
-    const expiresOn = new Date(Date.now() + READ_MINUTES * 60_000);
+    const expiresOn = new Date(Date.now() + (options.minutes ?? READ_MINUTES) * 60_000);
     const sas = generateBlobSASQueryParameters(
       {
         containerName: container,
@@ -109,7 +113,7 @@ export class BlobStorage {
         permissions: BlobSASPermissions.parse('r'),
         startsOn: new Date(Date.now() - 60_000),
         expiresOn,
-        contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        contentDisposition: `${options.inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
       credential,
     );
