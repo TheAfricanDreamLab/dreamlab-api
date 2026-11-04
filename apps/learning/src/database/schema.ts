@@ -16,6 +16,7 @@ export * from '../modules/community/entities/recording.entity';
 export * from '../modules/community/entities/mentor-assignment.entity';
 export * from '../modules/community/entities/mentor-meeting.entity';
 export * from '../modules/community/entities/dream-circle.entity';
+export * from '../modules/community/entities/circle-post.entity';
 export * from '../modules/outcomes/entities/residency-stage.entity';
 export * from '../modules/outcomes/entities/action-plan.entity';
 export * from '../modules/outcomes/entities/graduation.entity';

@@ -6,8 +6,10 @@ import { InjectDatabase } from '@lib/database';
 import type { MeetKit } from '@lib/meet-kit';
 import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { IamRpc, RpcClient, UserName } from '@lib/rpc';
+import type { BlobStorage } from '@lib/storage';
 import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
+import { STORAGE } from '../files/files.service';
 import { IAM_NAMES } from '../player/player.service';
 import { MEET_KIT } from './live.service';
 
@@ -33,6 +35,7 @@ export class CommunityService {
     @InjectOutbox() private readonly outbox: OutboxWriter,
     @Inject(MEET_KIT) private readonly meet: MeetKit,
     @Inject(IAM_NAMES) private readonly iam: RpcClient,
+    @Inject(STORAGE) private readonly storage: BlobStorage,
   ) {}
 
   // ---------- helpers ----------
@@ -194,6 +197,25 @@ export class CommunityService {
       : [];
     const names = await this.names(assignments.flatMap((r) => [r.a.mentorUserId, r.a.learnerUserId]));
     const byAssignment = new Map(assignments.map((r) => [r.a.id, r.a]));
+    // The circles the mentees are in: the mentor reads and moderates them (COMM-2).
+    const mentees = [...new Set(assignments.map((r) => r.a.learnerUserId))];
+    const circles = mentees.length
+      ? await this.db.sys
+          .selectDistinct({ id: dreamCircles.id, name: dreamCircles.name, cohortName: cohorts.name })
+          .from(circleMembers)
+          .innerJoin(dreamCircles, eq(dreamCircles.id, circleMembers.circleId))
+          .innerJoin(cohorts, eq(cohorts.id, dreamCircles.cohortId))
+          .where(
+            and(
+              inArray(circleMembers.userId, mentees),
+              inArray(
+                dreamCircles.cohortId,
+                assignments.map((r) => r.a.cohortId),
+              ),
+            ),
+          )
+          .orderBy(asc(dreamCircles.name))
+      : [];
     return {
       learners: assignments.map(({ a, cohortName }) => {
         const mine = meetings.filter((m) => m.assignmentId === a.id && m.status !== 'cancelled');
@@ -202,6 +224,7 @@ export class CommunityService {
         return { ...this.toAssignment(a, names), cohortName, lastMeetingAt: last?.toISOString() ?? null, nextMeetingAt: next?.toISOString() ?? null };
       }),
       meetings: meetings.slice(0, 100).map((m) => this.toMeeting(m, byAssignment.get(m.assignmentId)!, names, false, now)),
+      circles,
     };
   }
 
@@ -335,6 +358,9 @@ export class CommunityService {
     const [c] = await this.db.sys.select().from(dreamCircles).where(eq(dreamCircles.id, circleId));
     if (!c) throw notFound('circle_not_found', 'Circle not found');
     await this.managedCohort(p, c.cohortId);
+    // Its files first: if storage is unavailable this fails with nothing deleted, and can be tried again.
+    // Removing by folder catches every file, posted or not.
+    await this.storage.removeAll('private', `circles/${c.id}/`);
     await this.db.system(async (tx) => {
       await tx.delete(circleMembers).where(eq(circleMembers.circleId, c.id));
       await tx.delete(dreamCircles).where(eq(dreamCircles.id, c.id));

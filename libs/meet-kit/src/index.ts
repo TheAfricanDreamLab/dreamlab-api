@@ -71,7 +71,7 @@ export class MeetKit {
   }
 
   /** `<prefix>-<kind>-<id>`: one server hosts several environments without collisions. */
-  roomName(kind: 'session' | 'mentor', id: string): string {
+  roomName(kind: 'session' | 'mentor' | 'circle', id: string): string {
     return `${this.config.MEETINGS_ROOM_PREFIX}-${kind}-${id}`;
   }
 
@@ -103,6 +103,25 @@ export class MeetKit {
       canPublishSources: role === 'host' ? undefined : options.participantVideo ? [TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO] : [TrackSource.MICROPHONE],
     });
     return { url: config.LIVEKIT_URL!, token: await at.toJwt(), roomName, expiresAt: new Date(Date.now() + TOKEN_TTL_SECONDS * 1000) };
+  }
+
+  private readonly counts = new Map<string, { n: number; until: number }>();
+
+  /**
+   * How many people are in a room now (0 when it does not exist). Cached for 10 seconds, so a busy
+   * page asks the server at most every 10 seconds per room; 0 when live rooms are not set up.
+   */
+  async participantCount(roomName: string): Promise<number> {
+    if (!this.rooms) return 0;
+    const hit = this.counts.get(roomName);
+    if (hit && hit.until > Date.now()) return hit.n;
+    const n = await this.rooms.listParticipants(roomName).then(
+      (ps) => ps.length,
+      () => 0,
+    );
+    if (this.counts.size > 2000) this.counts.clear();
+    this.counts.set(roomName, { n, until: Date.now() + 10_000 });
+    return n;
   }
 
   /** Verifies the provider's signature; null for anything that is not a valid event. */

@@ -3,7 +3,8 @@ import { CONFIG } from '@lib/config';
 import { CATALOG_RPC_QUEUE, CatalogClient, IAM_USERS_QUEUE, RpcClient } from '@lib/rpc';
 import { MeetKit } from '@lib/meet-kit';
 import { BlobStorage } from '@lib/storage';
-import { CommunityController, LiveController, MeetingWebhookController } from './community/community.controller';
+import { CircleSpaceController, CommunityController, LiveController, MeetingWebhookController } from './community/community.controller';
+import { CircleSpaceService } from './community/circle-space.service';
 import { CommunityService } from './community/community.service';
 import { LiveService, MEET_KIT } from './community/live.service';
 import type { LearningConfig } from '../config';
@@ -27,7 +28,7 @@ import { OUTCOMES_CONTROLLERS, OUTCOMES_PROVIDERS } from './outcomes';
 import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
 
 @Module({
-  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController, ...OUTCOMES_CONTROLLERS, ...SCORES_CONTROLLERS, ...ASSIGNED_CONTROLLERS],
+  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController, CircleSpaceController, ...OUTCOMES_CONTROLLERS, ...SCORES_CONTROLLERS, ...ASSIGNED_CONTROLLERS],
   providers: [
     EnrollmentsService,
     CohortsService,
@@ -39,6 +40,7 @@ import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
     AdmissionsIntake,
     LiveService,
     CommunityService,
+    CircleSpaceService,
     { provide: MEET_KIT, inject: [CONFIG], useFactory: (c: LearningConfig) => new MeetKit(c) },
     FilesService,
     { provide: STORAGE, inject: [CONFIG], useFactory: (c: LearningConfig) => new BlobStorage(c) },
