@@ -6,8 +6,10 @@ import { InjectDatabase } from '@lib/database';
 import type { MeetKit } from '@lib/meet-kit';
 import { InjectOutbox, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { IamRpc, RpcClient, UserName } from '@lib/rpc';
+import type { BlobStorage } from '@lib/storage';
 import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { LearningDatabase, LearningTx, schema } from '../../database';
+import { STORAGE } from '../files/files.service';
 import { IAM_NAMES } from '../player/player.service';
 import { MEET_KIT } from './live.service';
 
@@ -33,6 +35,7 @@ export class CommunityService {
     @InjectOutbox() private readonly outbox: OutboxWriter,
     @Inject(MEET_KIT) private readonly meet: MeetKit,
     @Inject(IAM_NAMES) private readonly iam: RpcClient,
+    @Inject(STORAGE) private readonly storage: BlobStorage,
   ) {}
 
   // ---------- helpers ----------
@@ -355,6 +358,9 @@ export class CommunityService {
     const [c] = await this.db.sys.select().from(dreamCircles).where(eq(dreamCircles.id, circleId));
     if (!c) throw notFound('circle_not_found', 'Circle not found');
     await this.managedCohort(p, c.cohortId);
+    // Its files first: if storage is unavailable this fails with nothing deleted, and can be tried again.
+    // Removing by folder catches every file, posted or not.
+    await this.storage.removeAll('private', `circles/${c.id}/`);
     await this.db.system(async (tx) => {
       await tx.delete(circleMembers).where(eq(circleMembers.circleId, c.id));
       await tx.delete(dreamCircles).where(eq(dreamCircles.id, c.id));

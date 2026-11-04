@@ -66,7 +66,7 @@ async function previewOne(raw: string, signal: AbortSignal): Promise<LinkPreview
   try {
     const url = new URL(raw);
     if (url.protocol !== 'https:' || (url.port && url.port !== '443') || url.username || url.password) return bare;
-    if (!(await publicAddresses(url.hostname))) return bare;
+    if (!(await publicAddresses(url.hostname, signal))) return bare;
     const res = await fetch(url, { redirect: 'manual', signal, headers: { accept: 'text/html', 'user-agent': 'DreamLabLinkPreview/1.0' } });
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('text/html') || !res.body) return bare;
     const reader = res.body.getReader();

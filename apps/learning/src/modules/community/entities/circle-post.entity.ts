@@ -22,7 +22,8 @@ export const circlePosts = pgTable(
     replyCount: integer('reply_count').notNull().default(0),
     pinnedAt: timestamp('pinned_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Milliseconds, like the page cursor that carries it, so keyset pages neither repeat nor skip.
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
   (t) => [
     // The board: a circle's top-level posts, newest first (keyset pages on created_at, id).

@@ -217,7 +217,7 @@ export class CircleSpaceService {
   }
 
   private attachmentView(f: AttachmentRow): CircleAttachment {
-    const link = this.storage.readLink(f.path, f.fileName, { inline: f.kind !== 'file', minutes: MEDIA_LINK_MINUTES });
+    const link = this.storage.readLink(f.path, f.fileName, { inline: f.kind !== 'file', minutes: MEDIA_LINK_MINUTES, contentType: f.contentType });
     return {
       id: f.id,
       kind: f.kind,
@@ -291,6 +291,12 @@ export class CircleSpaceService {
     for (const [i, f] of files.entries()) {
       const blob = stored[i];
       if (!blob) throw badRequest('attachment_not_uploaded', `${f.fileName} has not finished uploading.`);
+      // The upload link does not bind the type the browser sends; a file stored as anything other than
+      // the type it was approved as (say HTML sent as a picture) is refused and removed.
+      if ((blob.contentType ?? '').toLowerCase().split(';')[0]!.trim() !== f.contentType) {
+        await this.storage.remove('private', f.path).catch(() => undefined);
+        throw badRequest('file_type_mismatch', `${f.fileName} is not the kind of file it said it was. Add it again.`);
+      }
       if (blob.size > CIRCLE_UPLOAD_LIMITS[f.kind]) {
         await this.storage.remove('private', f.path).catch(() => undefined);
         throw badRequest('file_too_large', `${f.fileName} is too large.`);

@@ -58,12 +58,16 @@ describe('email domains', () => {
 });
 
 describe('identity-provider URLs (SSRF guard)', () => {
-  it.each(['127.0.0.1', '10.1.2.3', '172.20.0.5', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:a9fe:a9fe'])(
+  it.each(['127.0.0.1', '10.1.2.3', '172.20.0.5', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:a9fe:a9fe',
+    // Reserved IPv4 test ranges, at their edges.
+    '192.0.2.0', '192.0.2.255', '198.51.100.7', '203.0.113.255',
+    // IPv6 that carries an IPv4 address: IPv4-compatible, NAT64 (well-known and local) and 6to4.
+    '::a00:1', '64:ff9b::a00:1', '64:ff9b:1::1', '2002:a00:1::1', '2001:db8::1'])(
     '%s is private',
     (ip) => expect(isPrivateAddress(ip)).toBe(true),
   );
 
-  it.each(['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111'])('%s is public', (ip) => expect(isPrivateAddress(ip)).toBe(false));
+  it.each(['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '192.0.3.1', '203.0.114.1', '64:ff9c::1', '2003::1'])('%s is public', (ip) => expect(isPrivateAddress(ip)).toBe(false));
 
   it('needs https and a public address unless private URLs are allowed', async () => {
     await expect(assertSafeUrl('http://idp.example.org', false)).rejects.toThrow('https');

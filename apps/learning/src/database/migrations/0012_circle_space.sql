@@ -27,7 +27,7 @@ CREATE TABLE "circle_posts" (
 	"reply_count" integer DEFAULT 0 NOT NULL,
 	"pinned_at" timestamp with time zone,
 	"deleted_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "circle_attachments" ADD CONSTRAINT "circle_attachments_circle_id_dream_circles_id_fk" FOREIGN KEY ("circle_id") REFERENCES "public"."dream_circles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

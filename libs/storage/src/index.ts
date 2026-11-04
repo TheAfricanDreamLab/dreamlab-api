@@ -100,9 +100,9 @@ export class BlobStorage {
   /**
    * A read-only link to a private blob, opened as a download with its original name. `inline` lets
    * pages show it in place (pictures, voice messages, videos), with a longer life (`minutes`) so a
-   * page left open keeps playing.
+   * page left open keeps playing. `contentType` makes storage serve it as that type, whatever was stored.
    */
-  readLink(path: string, fileName: string, options: { inline?: boolean; minutes?: number } = {}): { url: string; expiresAt: string } {
+  readLink(path: string, fileName: string, options: { inline?: boolean; minutes?: number; contentType?: string } = {}): { url: string; expiresAt: string } {
     const { service, credential } = this.require();
     const container = this.container('private');
     const expiresOn = new Date(Date.now() + (options.minutes ?? READ_MINUTES) * 60_000);
@@ -114,6 +114,7 @@ export class BlobStorage {
         startsOn: new Date(Date.now() - 60_000),
         expiresOn,
         contentDisposition: `${options.inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        contentType: options.contentType,
       },
       credential,
     );
@@ -136,6 +137,18 @@ export class BlobStorage {
   async remove(visibility: Visibility, path: string): Promise<void> {
     const { service } = this.require();
     await service.getContainerClient(this.container(visibility)).getBlobClient(path).deleteIfExists();
+  }
+
+  /** Removes every blob under a folder, e.g. `circles/<id>/`; returns how many went. */
+  async removeAll(visibility: Visibility, prefix: string): Promise<number> {
+    if (!prefix.endsWith('/') || prefix.length < 2) throw new Error('removeAll needs a folder prefix ending in /');
+    const container = this.require().service.getContainerClient(this.container(visibility));
+    let removed = 0;
+    for await (const blob of container.listBlobsFlat({ prefix })) {
+      await container.getBlobClient(blob.name).deleteIfExists();
+      removed++;
+    }
+    return removed;
   }
 
   private container(visibility: Visibility): string {
