@@ -3,12 +3,15 @@ import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   apiV1Contract,
   AssignMentorsSchema,
+  CircleContactSchema,
+  CircleMeetupSchema,
   CirclePostPageSchema,
   CirclePostSchema,
   CirclePostsQuerySchema,
   CircleSpaceSchema,
   CircleUploadRequestSchema,
   CircleUploadTicketSchema,
+  CreateCircleMeetupSchema,
   CreateCirclePostSchema,
   DreamCircleSchema,
   FileLinkSchema,
@@ -223,6 +226,10 @@ class CreateCirclePostDto extends createZodDto(CreateCirclePostSchema) {}
 class CircleUploadRequestDto extends createZodDto(CircleUploadRequestSchema) {}
 class CircleUploadTicketDto extends createZodDto(CircleUploadTicketSchema) {}
 class CirclePostParamsDto extends createZodDto(z.object({ postId: UuidSchema })) {}
+class CircleContactDto extends createZodDto(CircleContactSchema) {}
+class CircleMeetupDto extends createZodDto(CircleMeetupSchema) {}
+class CreateCircleMeetupDto extends createZodDto(CreateCircleMeetupSchema) {}
+class CircleMeetupParamsDto extends createZodDto(z.object({ meetupId: UuidSchema })) {}
 class PinDto extends createZodDto(z.object({ pinned: z.boolean() })) {}
 
 /** A Dream Circle's own space: its board, uploads and call (COMM-2). The service decides who may enter. */
@@ -272,6 +279,27 @@ export class CircleSpaceController {
   @ZodResponse({ status: 201, type: CircleUploadTicketDto })
   upload(@Param() p: CircleParamsDto, @Body() dto: CircleUploadRequestDto, @CurrentPrincipal() principal: Principal) {
     return this.circles.upload(principal, p.circleId, dto);
+  }
+
+  @Put('circles/:circleId/contact')
+  @ApiOperation({ summary: r.saveCircleContact.summary })
+  @ZodResponse({ status: 200, type: CircleContactDto })
+  saveContact(@Param() p: CircleParamsDto, @Body() dto: CircleContactDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.saveContact(principal, p.circleId, dto);
+  }
+
+  @Post('circles/:circleId/meetups')
+  @ApiOperation({ summary: r.createCircleMeetup.summary })
+  @ZodResponse({ status: 201, type: CircleMeetupDto })
+  createMeetup(@Param() p: CircleParamsDto, @Body() dto: CreateCircleMeetupDto, @CurrentPrincipal() principal: Principal) {
+    return this.circles.createMeetup(principal, p.circleId, dto);
+  }
+
+  @Delete('circle-meetups/:meetupId')
+  @HttpCode(204)
+  @ApiOperation({ summary: r.cancelCircleMeetup.summary })
+  async cancelMeetup(@Param() p: CircleMeetupParamsDto, @CurrentPrincipal() principal: Principal) {
+    await this.circles.cancelMeetup(principal, p.meetupId);
   }
 
   @Post('circles/:circleId/call')
