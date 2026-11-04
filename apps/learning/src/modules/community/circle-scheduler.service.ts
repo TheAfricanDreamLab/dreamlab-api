@@ -3,7 +3,7 @@ import { CIRCLE_MEETUP_REMINDER_MINUTES } from '@dreamlab/contracts';
 import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, requestNotification } from '@lib/messaging';
 import type { BlobStorage } from '@lib/storage';
-import { and, eq, gt, inArray, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lt, lte } from 'drizzle-orm';
 import { LearningDatabase, schema } from '../../database';
 import { STORAGE } from '../files/files.service';
 import { meetupWhen } from './circle-time';
@@ -47,42 +47,50 @@ export class CircleSchedulerService implements OnApplicationBootstrap, OnApplica
   /** Sends the meetup reminders now due; returns how many meetups were reminded. */
   async remind(now = new Date()): Promise<number> {
     const window = and(isNull(circleMeetups.cancelledAt), isNull(circleMeetups.reminderSentAt), gt(circleMeetups.startsAt, now), lte(circleMeetups.startsAt, new Date(now.getTime() + AHEAD_MS)));
-    const due = await this.db.sys.select({ id: circleMeetups.id }).from(circleMeetups).where(window).limit(100);
+    const due = await this.db.sys.select({ id: circleMeetups.id }).from(circleMeetups).where(window).orderBy(asc(circleMeetups.startsAt), asc(circleMeetups.id)).limit(100);
     let sent = 0;
     for (const { id } of due) {
-      await this.db.system(async (tx) => {
-        // Claimed by the update, so two instances never send the same reminder.
-        const [m] = await tx
-          .update(circleMeetups)
-          .set({ reminderSentAt: now })
-          .where(and(eq(circleMeetups.id, id), window))
-          .returning();
-        if (!m) return;
-        const [circle] = await tx
-          .select({ name: dreamCircles.name, cohortId: dreamCircles.cohortId, timeZone: cohorts.timeZone })
-          .from(dreamCircles)
-          .innerJoin(cohorts, eq(cohorts.id, dreamCircles.cohortId))
-          .where(eq(dreamCircles.id, m.circleId));
-        if (!circle) return;
-        const members = (await tx.select({ userId: circleMembers.userId }).from(circleMembers).where(eq(circleMembers.circleId, m.circleId))).map((r) => r.userId);
-        if (members.length === 0) return;
-        const mentors = await tx
-          .selectDistinct({ userId: mentorAssignments.mentorUserId })
-          .from(mentorAssignments)
-          .where(and(eq(mentorAssignments.cohortId, circle.cohortId), isNull(mentorAssignments.endedAt), inArray(mentorAssignments.learnerUserId, members)));
-        await requestNotification(this.outbox, tx, {
-          to: { userIds: [...new Set([...members, ...mentors.map((r) => r.userId)])] },
-          category: 'circles',
-          title: `Soon: ${m.title}`,
-          body: `${circle.name} meets ${m.location ? `at ${m.location}` : 'online in the circle call'} on ${meetupWhen(m.startsAt, circle.timeZone)}.`,
-          link: m.mode === 'virtual' ? `/app/circles/${m.circleId}/call` : `/app/circles/${m.circleId}`,
-          orgId: m.hostOrgId,
-          key: `circle-meetup-reminder:${m.id}:${m.startsAt.toISOString()}`,
-        });
-        sent++;
-      });
+      // One meetup that fails (say a bad time zone) is logged and retried next time; the rest still go out.
+      await this.remindOne(id, now, window).then(
+        (ok) => (sent += ok ? 1 : 0),
+        (e: unknown) => this.logger.error(`Could not remind meetup ${id}: ${e instanceof Error ? e.message : String(e)}`),
+      );
     }
     return sent;
+  }
+
+  private remindOne(id: string, now: Date, window: ReturnType<typeof and>): Promise<boolean> {
+    return this.db.system(async (tx) => {
+      // Claimed by the update, so two instances never send the same reminder.
+      const [m] = await tx
+        .update(circleMeetups)
+        .set({ reminderSentAt: now })
+        .where(and(eq(circleMeetups.id, id), window))
+        .returning();
+      if (!m) return false;
+      const [circle] = await tx
+        .select({ name: dreamCircles.name, cohortId: dreamCircles.cohortId, timeZone: cohorts.timeZone })
+        .from(dreamCircles)
+        .innerJoin(cohorts, eq(cohorts.id, dreamCircles.cohortId))
+        .where(eq(dreamCircles.id, m.circleId));
+      if (!circle) return false;
+      const members = (await tx.select({ userId: circleMembers.userId }).from(circleMembers).where(eq(circleMembers.circleId, m.circleId))).map((r) => r.userId);
+      if (members.length === 0) return false;
+      const mentors = await tx
+        .selectDistinct({ userId: mentorAssignments.mentorUserId })
+        .from(mentorAssignments)
+        .where(and(eq(mentorAssignments.cohortId, circle.cohortId), isNull(mentorAssignments.endedAt), inArray(mentorAssignments.learnerUserId, members)));
+      await requestNotification(this.outbox, tx, {
+        to: { userIds: [...new Set([...members, ...mentors.map((r) => r.userId)])] },
+        category: 'circles',
+        title: `Soon: ${m.title}`,
+        body: `${circle.name} meets ${m.location ? `at ${m.location}` : 'online in the circle call'} on ${meetupWhen(m.startsAt, circle.timeZone)}.`,
+        link: m.mode === 'virtual' ? `/app/circles/${m.circleId}/call` : `/app/circles/${m.circleId}`,
+        orgId: m.hostOrgId,
+        key: `circle-meetup-reminder:${m.id}:${m.startsAt.toISOString()}`,
+      });
+      return true;
+    });
   }
 
   /** Removes files uploaded for posts that were never made; returns how many went. */
@@ -97,8 +105,13 @@ export class CircleSchedulerService implements OnApplicationBootstrap, OnApplica
       // Only while still unattached: a post made in the meantime keeps its file.
       const gone = await this.db.system((tx) => tx.delete(circleAttachments).where(and(eq(circleAttachments.id, f.id), isNull(circleAttachments.postId))).returning({ id: circleAttachments.id }));
       if (gone.length === 0) continue;
-      await this.storage.remove('private', f.path).catch(() => undefined);
-      removed++;
+      try {
+        await this.storage.remove('private', f.path);
+        removed++;
+      } catch (e) {
+        // The row is gone, so nothing retries this: leave a trace to clean up by hand.
+        this.logger.error(`Could not remove unposted circle file ${f.path}: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     return removed;
   }

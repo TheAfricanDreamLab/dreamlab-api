@@ -148,7 +148,8 @@ export class CircleSpaceService {
         .orderBy(asc(circleMeetups.startsAt))
         .limit(MEETUPS_LISTED),
     ]);
-    const shared = new Map(contacts.map((c) => [c.userId, contactView(c)]));
+    // Contact details are shared with the circle (its members and their mentors), not with cohort staff.
+    const shared = new Map(a.role === 'staff' ? [] : contacts.map((c) => [c.userId, contactView(c)]));
     const hosts = await this.names(meetups.map((m) => m.createdByUserId).filter((id) => !names.has(id)));
     const members = [...roles.entries()]
       .map(([userId, role]) => ({ userId, name: names.get(userId) ?? 'Member', role, contact: shared.get(userId) ?? null }))

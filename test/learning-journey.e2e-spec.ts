@@ -1376,6 +1376,8 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     expect(shared).toMatchObject({ status: 200, body: { email: 'ada@circle.test', phone: '+2348012345678', whatsapp: true, linkedin: null } });
     expect((await space(bayo)).members.find((m) => m.name === 'Ada Eze')!.contact).toMatchObject({ email: 'ada@circle.test', whatsapp: true });
     expect((await space(ada)).you.contact).toMatchObject({ phone: '+2348012345678' });
+    // Cohort staff can open the circle, but contact details stay within it.
+    expect((await space(owner)).members.find((m) => m.name === 'Ada Eze')!.contact).toBeNull();
     // WhatsApp needs a number; staff are not listed in the circle, so they share nothing here.
     expect((await request(learning, 'PUT', `${base}/contact`, { ...L(bayo), body: { whatsapp: true } })).body).toEqual({ email: null, phone: null, whatsapp: false, linkedin: null });
     expect((await space(ada)).members.find((m) => m.name === 'Bayo Ade')!.contact).toBeNull();
