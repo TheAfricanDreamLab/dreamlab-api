@@ -16,6 +16,8 @@ export interface TokenContext {
   orgId: string | null;
   membershipId: string | null;
   roles: string[];
+  /** The organisation awaits platform approval (the token's opd claim). */
+  orgPending?: boolean;
 }
 
 export const PERSONAL: TokenContext = { orgId: null, membershipId: null, roles: [] };
@@ -74,7 +76,7 @@ export class SessionIssuer {
   async resolveContext(userId: string, preferredOrgId: string | null): Promise<TokenContext> {
     if (!preferredOrgId) return PERSONAL;
     const access = await this.authz.orgAccess(userId, preferredOrgId);
-    return access ? { orgId: preferredOrgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access) } : PERSONAL;
+    return access ? { orgId: preferredOrgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access), orgPending: !!access.orgPending } : PERSONAL;
   }
 
   async tokenResponse(session: SessionForTokens, context: TokenContext): Promise<TokenResponse> {

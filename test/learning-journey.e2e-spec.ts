@@ -1286,3 +1286,29 @@ describe('instructors and course staff (INSTR-1)', () => {
     expect((await request(catalog, 'DELETE', `/v1/catalog/instructors/${profileId}`, L(admin))).status).toBe(204);
   });
 });
+
+describe('an organisation in review (ORG-003)', () => {
+  it('lets its admins set it up, and nothing more until a platform admin approves it', async () => {
+    const personal = await signUp('head@uyo-school.test', 'Uche Head');
+    const created = await request(iam, 'POST', '/v1/orgs/signup', { token: personal, body: { name: 'Uyo School', kind: 'institution' } });
+    expect(created).toMatchObject({ status: 201, body: { status: 'pending' } });
+    const orgId = (created.body as { id: string }).id;
+    const enter = async () => ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    const permissions = async (token: string) => ((await request(iam, 'GET', '/v1/me', L(token))).body as { permissions: string[] }).permissions;
+    const cohort = { programSlug: 'the-african-dream-lab', name: 'Uyo 01', startsOn: todayIn('Africa/Lagos') };
+
+    // Set-up only: settings, people and roles, but no cohorts (or courses, admissions, assigned learning).
+    const head = await enter();
+    expect(await permissions(head)).toEqual(expect.arrayContaining(['org.settings.update', 'org.members.invite']));
+    expect(await permissions(head)).not.toContain('cohort.manage');
+    expect((await request(learning, 'POST', '/v1/learning/cohorts', { ...L(head), body: cohort })).status).toBe(403);
+    expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: head, body: { email: 'deputy@uyo-school.test', roleKeys: ['org_admin'] } })).status).toBe(201);
+
+    // Approval takes effect at once, even for the token issued while it was in review.
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    expect((await request(iam, 'PATCH', `/v1/orgs/${orgId}`, { token: admin, body: { status: 'active' } })).status).toBe(200);
+    expect((await request(learning, 'POST', '/v1/learning/cohorts', { ...L(head), body: cohort })).status).toBe(201);
+    expect(await permissions(await enter())).toContain('cohort.manage');
+  });
+});

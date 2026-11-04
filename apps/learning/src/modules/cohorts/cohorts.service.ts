@@ -178,6 +178,7 @@ export interface UpdateCohortInput {
 
 export interface UpdateSessionInput {
   location?: string | null;
+  mode?: "virtual" | "physical";
   cancelled?: boolean;
   startsAt?: string;
 }
@@ -470,6 +471,7 @@ export class CohortsService {
           .update(classSessions)
           .set({
             ...(input.location !== undefined && { location: input.location }),
+            ...(input.mode !== undefined && { mode: input.mode }),
             ...(input.cancelled !== undefined && {
               cancelled: input.cancelled,
             }),

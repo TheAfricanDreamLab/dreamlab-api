@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PERMISSIONS, Permission, ScopeType } from '@dreamlab/contracts';
+import { IN_REVIEW_PERMISSIONS, PERMISSIONS, Permission, ScopeType } from '@dreamlab/contracts';
 import { authzVersionKey, orgPermissions, Principal } from '@lib/auth';
 import { forbidden, InjectRedis } from '@lib/common';
 import { InjectConfig } from '@lib/config';
@@ -77,9 +77,9 @@ export class AuthzService {
     const cached = await this.redis.get(cacheKey);
     if (cached) return JSON.parse(cached) as OrgAccess | null;
 
-    // Suspended organisations grant nothing; pending ones can be set up by their admins.
+    // Suspended organisations grant nothing; pending ones only let their members set them up.
     const [membership] = await this.db.sys
-      .select({ id: memberships.id })
+      .select({ id: memberships.id, orgStatus: organizations.status })
       .from(memberships)
       .innerJoin(organizations, eq(organizations.id, memberships.orgId))
       .where(
@@ -107,11 +107,14 @@ export class AuthzService {
           and(eq(roleAssignments.scopeType, 'org_unit'), eq(orgUnits.id, roleAssignments.scopeId)),
         )
         .where(and(eq(roleAssignments.membershipId, membership.id), activeAssignment()));
+      const pending = membership.orgStatus === 'pending';
+      const allowed: readonly string[] = pending ? IN_REVIEW_PERMISSIONS : PERMISSIONS;
       access = {
         membershipId: membership.id,
+        orgPending: pending,
         grants: rows.map((r) => ({
           roleKey: r.roleKey,
-          permissions: r.permissions.filter((p): p is Permission => (PERMISSIONS as readonly string[]).includes(p)),
+          permissions: r.permissions.filter((p): p is Permission => allowed.includes(p)),
           scopeType: r.scopeType,
           scopeId: r.scopeId,
           unitPath: r.unitPath,

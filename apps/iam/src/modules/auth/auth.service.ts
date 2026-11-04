@@ -238,7 +238,7 @@ export class AuthService {
     if (orgId) {
       const access = await this.authz.orgAccess(principal.userId, orgId);
       if (!access) throw forbidden('not_a_member', 'You are not an active member of that organisation');
-      context = { orgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access) };
+      context = { orgId, membershipId: access.membershipId, roles: AuthzService.orgRoleKeys(access), orgPending: !!access.orgPending };
     }
     return this.db.system(async (tx) => {
       await this.sessions.touch(tx, session.id, { activeOrgId: context.orgId, activeMembershipId: context.membershipId });
