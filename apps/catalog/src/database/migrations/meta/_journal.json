@@ -43,6 +43,13 @@
       "when": 1793217015530,
       "tag": "0005_instructors",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793889378893,
+      "tag": "0006_draft_history",
+      "breakpoints": true
     }
   ]
 }
