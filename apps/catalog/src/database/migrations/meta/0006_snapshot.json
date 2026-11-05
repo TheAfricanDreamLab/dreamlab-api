@@ -1,5 +1,5 @@
 {
-  "id": "c5b132fb-ae24-4620-bf3b-a09c1576f6d9",
+  "id": "32125bac-e692-41b5-8ad2-bec0d3c68797",
   "prevId": "79133610-c371-4d5e-873d-a1eb54e0d6ef",
   "version": "7",
   "dialect": "postgresql",
@@ -50,6 +50,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "checkpoint": {
+          "name": "checkpoint",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

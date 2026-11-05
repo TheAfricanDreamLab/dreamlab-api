@@ -6,6 +6,7 @@ CREATE TABLE "course_draft_saves" (
 	"title" text NOT NULL,
 	"saved_by_user_id" uuid NOT NULL,
 	"saved_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"checkpoint" boolean DEFAULT false NOT NULL,
 	CONSTRAINT "course_draft_saves_draft_id_revision_pk" PRIMARY KEY("draft_id","revision")
 );
 --> statement-breakpoint
