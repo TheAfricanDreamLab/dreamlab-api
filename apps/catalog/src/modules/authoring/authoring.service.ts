@@ -19,7 +19,7 @@ import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, type NotificationRequest, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { IamRpc, RpcClient, UserName } from '@lib/rpc';
 import { BlobStorage, safeFileName } from '@lib/storage';
-import { and, asc, desc, eq, inArray, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import type { CatalogConfig } from '../../config';
 import { CatalogDatabase, schema } from '../../database';
 import { CatalogReadService } from '../courses/catalog-read.service';
@@ -146,7 +146,7 @@ export class AuthoringService {
   }
 
   /** Whole-document save; incomplete is fine. The slug never changes. */
-  async save(p: Principal, draftId: string, input: { revision: number; doc: Record<string, unknown>; checkpoint?: boolean }): Promise<Draft> {
+  async save(p: Principal, draftId: string, input: { revision: number; doc: Record<string, unknown>; checkpoint?: boolean }, restoring = false): Promise<Draft> {
     const draft = await this.visible(p, draftId);
     if (!(await this.canEdit(p, draft))) throw forbidden('permission_denied', 'Only the course’s authors can change it.');
     if (draft.status === 'in_review') throw conflict('draft_in_review', 'This draft is waiting for review. Take it back from review to keep editing.');
@@ -164,6 +164,13 @@ export class AuthoringService {
         .returning();
       const saved = updated[0];
       if (saved) {
+        // A restore keeps what it replaces as its own entry, in the same transaction as the save.
+        if (restoring) {
+          await tx
+            .update(courseDraftSaves)
+            .set({ checkpoint: true })
+            .where(and(eq(courseDraftSaves.draftId, saved.id), eq(courseDraftSaves.revision, input.revision)));
+        }
         // Autosaves: the author's last entry, if it is recent and not the draft's start or a
         // checkpoint, gives way to this one, so the history keeps one entry per few minutes of work.
         if (!input.checkpoint) {
@@ -181,7 +188,14 @@ export class AuthoringService {
           .insert(courseDraftSaves)
           .values({ draftId: saved.id, revision: saved.revision, ownerOrgId: saved.ownerOrgId, doc, title, savedByUserId: p.userId, checkpoint: input.checkpoint === true })
           .onConflictDoNothing();
-        await tx.delete(courseDraftSaves).where(and(eq(courseDraftSaves.draftId, saved.id), lte(courseDraftSaves.revision, saved.revision - DRAFT_HISTORY_KEPT)));
+        // Keep the newest DRAFT_HISTORY_KEPT stored entries (merged autosaves leave gaps in revisions).
+        const keep = tx
+          .select({ revision: courseDraftSaves.revision })
+          .from(courseDraftSaves)
+          .where(eq(courseDraftSaves.draftId, saved.id))
+          .orderBy(desc(courseDraftSaves.revision))
+          .limit(DRAFT_HISTORY_KEPT);
+        await tx.delete(courseDraftSaves).where(and(eq(courseDraftSaves.draftId, saved.id), notInArray(courseDraftSaves.revision, keep)));
       }
       return updated;
     });
@@ -233,14 +247,8 @@ export class AuthoringService {
   /** An earlier save becomes the newest one; what was there stays in the history. */
   async restore(p: Principal, draftId: string, input: { revision: number; restore: number }): Promise<Draft> {
     const { doc } = await this.historyDoc(p, draftId, input.restore);
-    // A restore is always its own entry, and so is what was there before it.
-    await this.db.system((tx) =>
-      tx
-        .update(courseDraftSaves)
-        .set({ checkpoint: true })
-        .where(and(eq(courseDraftSaves.draftId, draftId), eq(courseDraftSaves.revision, input.revision))),
-    );
-    return this.save(p, draftId, { revision: input.revision, doc, checkpoint: true });
+    // A restore is always its own entry, and so is what was there before it (marked inside the save).
+    return this.save(p, draftId, { revision: input.revision, doc, checkpoint: true }, true);
   }
 
   async submit(p: Principal, draftId: string): Promise<Draft> {
