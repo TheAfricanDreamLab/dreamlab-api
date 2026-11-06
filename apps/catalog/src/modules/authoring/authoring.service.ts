@@ -4,7 +4,10 @@ import {
   type CourseAuthoring,
   CourseAuthoringSchema,
   type Draft,
+  DRAFT_CHECKPOINT_MINUTES,
+  DRAFT_HISTORY_KEPT,
   draftIssues,
+  type DraftSave,
   type DraftSummary,
   type CourseMediaUpload,
   type Permission,
@@ -16,7 +19,7 @@ import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, type NotificationRequest, OutboxWriter, requestNotification, userActor } from '@lib/messaging';
 import { IamRpc, RpcClient, UserName } from '@lib/rpc';
 import { BlobStorage, safeFileName } from '@lib/storage';
-import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import type { CatalogConfig } from '../../config';
 import { CatalogDatabase, schema } from '../../database';
 import { CatalogReadService } from '../courses/catalog-read.service';
@@ -24,7 +27,7 @@ import { CatalogSeedService, IAM_RPC } from '../seed/catalog-seed.service';
 
 export const STORAGE = Symbol('STORAGE');
 
-const { courseDrafts, courses, courseVersions, catalogListings } = schema;
+const { courseDrafts, courseDraftSaves, courses, courseVersions, catalogListings } = schema;
 type DraftRow = typeof courseDrafts.$inferSelect;
 type CourseRow = typeof courses.$inferSelect;
 
@@ -119,13 +122,15 @@ export class AuthoringService {
       values = { courseId: null, slug, title, visibility, doc: this.blank(slug, title, ownerName ?? '', visibility), baseVersionNo: null, ownerOrgId: orgId };
     }
     const id = newId();
-    const inserted = await this.db.system((tx) =>
-      tx
+    const inserted = await this.db.system(async (tx) => {
+      const rows = await tx
         .insert(courseDrafts)
         .values({ id, ...values, status: 'draft', createdByUserId: p.userId, updatedByUserId: p.userId })
         .onConflictDoNothing()
-        .returning(),
-    );
+        .returning();
+      if (rows[0]) await tx.insert(courseDraftSaves).values({ draftId: id, revision: rows[0].revision, ownerOrgId: values.ownerOrgId, doc: values.doc, title: values.title, savedByUserId: p.userId });
+      return rows;
+    });
     if (inserted.length === 0) {
       const [existing] = await this.db.sys
         .select({ id: courseDrafts.id })
@@ -141,7 +146,7 @@ export class AuthoringService {
   }
 
   /** Whole-document save; incomplete is fine. The slug never changes. */
-  async save(p: Principal, draftId: string, input: { revision: number; doc: Record<string, unknown> }): Promise<Draft> {
+  async save(p: Principal, draftId: string, input: { revision: number; doc: Record<string, unknown>; checkpoint?: boolean }, restoring = false): Promise<Draft> {
     const draft = await this.visible(p, draftId);
     if (!(await this.canEdit(p, draft))) throw forbidden('permission_denied', 'Only the course’s authors can change it.');
     if (draft.status === 'in_review') throw conflict('draft_in_review', 'This draft is waiting for review. Take it back from review to keep editing.');
@@ -150,16 +155,100 @@ export class AuthoringService {
     const doc: Record<string, unknown> = { ...input.doc, slug: draft.slug };
     const title = typeof doc.title === 'string' && doc.title.trim() ? doc.title.trim().slice(0, 160) : draft.title;
     const visibility = (VISIBILITIES as readonly unknown[]).includes(doc.visibility) ? (doc.visibility as DraftRow['visibility']) : draft.visibility;
-    const [row] = await this.db.system((tx) =>
-      tx
+    const [row] = await this.db.system(async (tx) => {
+      const updated = await tx
         .update(courseDrafts)
         .set({ doc, title, visibility, revision: draft.revision + 1, updatedByUserId: p.userId, updatedAt: new Date() })
         // Revision and status in one statement: a save can't land after the draft went for review.
         .where(and(eq(courseDrafts.id, draft.id), eq(courseDrafts.revision, input.revision), inArray(courseDrafts.status, ['draft', 'changes_requested'])))
-        .returning(),
-    );
+        .returning();
+      const saved = updated[0];
+      if (saved) {
+        // A restore keeps what it replaces as its own entry, in the same transaction as the save.
+        if (restoring) {
+          await tx
+            .update(courseDraftSaves)
+            .set({ checkpoint: true })
+            .where(and(eq(courseDraftSaves.draftId, saved.id), eq(courseDraftSaves.revision, input.revision)));
+        }
+        // Autosaves: the author's last entry, if it is recent and not the draft's start or a
+        // checkpoint, gives way to this one, so the history keeps one entry per few minutes of work.
+        if (!input.checkpoint) {
+          const [last] = await tx
+            .select({ revision: courseDraftSaves.revision, by: courseDraftSaves.savedByUserId, at: courseDraftSaves.savedAt, checkpoint: courseDraftSaves.checkpoint })
+            .from(courseDraftSaves)
+            .where(eq(courseDraftSaves.draftId, saved.id))
+            .orderBy(desc(courseDraftSaves.revision))
+            .limit(1);
+          if (last && last.revision > 1 && !last.checkpoint && last.by === p.userId && Date.now() - last.at.getTime() < DRAFT_CHECKPOINT_MINUTES * 60_000) {
+            await tx.delete(courseDraftSaves).where(and(eq(courseDraftSaves.draftId, saved.id), eq(courseDraftSaves.revision, last.revision)));
+          }
+        }
+        await tx
+          .insert(courseDraftSaves)
+          .values({ draftId: saved.id, revision: saved.revision, ownerOrgId: saved.ownerOrgId, doc, title, savedByUserId: p.userId, checkpoint: input.checkpoint === true })
+          .onConflictDoNothing();
+        // Keep the newest DRAFT_HISTORY_KEPT stored entries (merged autosaves leave gaps in revisions).
+        const keep = tx
+          .select({ revision: courseDraftSaves.revision })
+          .from(courseDraftSaves)
+          .where(eq(courseDraftSaves.draftId, saved.id))
+          .orderBy(desc(courseDraftSaves.revision))
+          .limit(DRAFT_HISTORY_KEPT);
+        await tx.delete(courseDraftSaves).where(and(eq(courseDraftSaves.draftId, saved.id), notInArray(courseDraftSaves.revision, keep)));
+      }
+      return updated;
+    });
     if (!row) throw conflict('draft_changed', 'Someone saved this draft after you opened it. Reload to see their changes, then make yours again.');
     return this.view(p, row);
+  }
+
+  /** The draft's recent saves, newest first, with how big the course was at each (CAT-5). */
+  async history(p: Principal, draftId: string): Promise<{ items: DraftSave[] }> {
+    const draft = await this.visible(p, draftId);
+    const modulesOf = sql`case when jsonb_typeof(${courseDraftSaves.doc}->'modules') = 'array' then ${courseDraftSaves.doc}->'modules' else '[]'::jsonb end`;
+    const rows = await this.db.sys
+      .select({
+        revision: courseDraftSaves.revision,
+        savedAt: courseDraftSaves.savedAt,
+        savedByUserId: courseDraftSaves.savedByUserId,
+        title: courseDraftSaves.title,
+        modules: sql<number>`jsonb_array_length(${modulesOf})::int`,
+        items: sql<number>`(select coalesce(sum(case when jsonb_typeof(m->'items') = 'array' then jsonb_array_length(m->'items') else 0 end), 0)::int from jsonb_array_elements(${modulesOf}) m)`,
+      })
+      .from(courseDraftSaves)
+      .where(eq(courseDraftSaves.draftId, draft.id))
+      .orderBy(desc(courseDraftSaves.revision))
+      .limit(DRAFT_HISTORY_KEPT);
+    const names = await this.userNames(rows.map((r) => r.savedByUserId));
+    return {
+      items: rows.map((r) => ({
+        revision: r.revision,
+        savedAt: r.savedAt.toISOString(),
+        savedBy: { userId: r.savedByUserId, name: names.get(r.savedByUserId) ?? 'An author' },
+        title: r.title,
+        modules: r.modules,
+        items: r.items,
+      })),
+    };
+  }
+
+  /** The document as it was at one save. */
+  async historyDoc(p: Principal, draftId: string, revision: number): Promise<{ revision: number; doc: Record<string, unknown> }> {
+    const draft = await this.visible(p, draftId);
+    const [row] = await this.db.sys
+      .select({ revision: courseDraftSaves.revision, doc: courseDraftSaves.doc })
+      .from(courseDraftSaves)
+      .where(and(eq(courseDraftSaves.draftId, draft.id), eq(courseDraftSaves.revision, revision)));
+    if (!row) throw notFound('save_not_found', 'That save is no longer kept.');
+    return row;
+  }
+
+  /** An earlier save becomes the newest one; what was there stays in the history. */
+  async restore(p: Principal, draftId: string, input: { revision: number; restore: number }): Promise<Draft> {
+    const { doc } = await this.historyDoc(p, draftId, input.restore);
+    // A restore is always its own entry, and so is what was there before it (marked inside the save).
+    return this.save(p, draftId, { revision: input.revision, doc, checkpoint: true }, true);
   }
 
   async submit(p: Principal, draftId: string): Promise<Draft> {

@@ -4,7 +4,22 @@ import { apiV1Contract } from '@dreamlab/contracts';
 import { Authenticated, CurrentPrincipal, Principal } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { AuthoringService } from './authoring.service';
-import { AuthoringOverviewDto, CourseMediaUploadDto, CourseMediaUploadRequestDto, CreateDraftDto, DraftDto, DraftParamsDto, EmptyBodyDto, RequestChangesDto, ReviewNoteDto, SaveDraftDto } from './dto/authoring.dto';
+import {
+  AuthoringOverviewDto,
+  CourseMediaUploadDto,
+  CourseMediaUploadRequestDto,
+  CreateDraftDto,
+  DraftDto,
+  DraftHistoryDocDto,
+  DraftHistoryDto,
+  DraftParamsDto,
+  DraftRevisionParamsDto,
+  EmptyBodyDto,
+  RequestChangesDto,
+  RestoreDraftDto,
+  ReviewNoteDto,
+  SaveDraftDto,
+} from './dto/authoring.dto';
 
 const r = apiV1Contract.authoring;
 
@@ -44,6 +59,31 @@ export class AuthoringController {
   @ZodResponse({ status: 200, type: DraftDto })
   save(@Param() p: DraftParamsDto, @Body() dto: SaveDraftDto, @CurrentPrincipal() principal: Principal) {
     return this.authoring.save(principal, p.draftId, dto);
+  }
+
+  @Get('drafts/:draftId/history')
+  @Authenticated()
+  @ApiOperation({ summary: r.history.summary })
+  @ZodResponse({ status: 200, type: DraftHistoryDto })
+  history(@Param() p: DraftParamsDto, @CurrentPrincipal() principal: Principal) {
+    return this.authoring.history(principal, p.draftId);
+  }
+
+  @Get('drafts/:draftId/history/:revision')
+  @Authenticated()
+  @ApiOperation({ summary: r.historyDoc.summary })
+  @ZodResponse({ status: 200, type: DraftHistoryDocDto })
+  historyDoc(@Param() p: DraftRevisionParamsDto, @CurrentPrincipal() principal: Principal) {
+    return this.authoring.historyDoc(principal, p.draftId, p.revision);
+  }
+
+  @Post('drafts/:draftId/restore')
+  @HttpCode(200)
+  @Authenticated()
+  @ApiOperation({ summary: r.restore.summary })
+  @ZodResponse({ status: 200, type: DraftDto })
+  restore(@Param() p: DraftParamsDto, @Body() dto: RestoreDraftDto, @CurrentPrincipal() principal: Principal) {
+    return this.authoring.restore(principal, p.draftId, dto);
   }
 
   @Post('drafts/:draftId/submit')

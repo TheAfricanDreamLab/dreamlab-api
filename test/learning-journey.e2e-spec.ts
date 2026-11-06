@@ -894,6 +894,35 @@ describe('course authoring in the browser (CAT-3)', () => {
     expect((await request(catalog, 'GET', url(draft.id), L(admin))).status).toBe(404);
   });
 
+  it('keeps each save, so an author can look back and restore one (CAT-5)', async () => {
+    const draft = (await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { slug: `${slug}-history`, title: 'Lost-wax History' } })).body as Draft;
+    const course = { ...fullCourse('org_private'), title: 'Lost-wax History' };
+    await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 1, doc: course, checkpoint: true } });
+    const grown = structuredClone(course);
+    grown.modules[0]!.items.push(lessonItem('patina', 'Finishing the patina'));
+    // Two autosaves a moment apart are kept as one entry: the latest.
+    await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 2, doc: { ...grown, subtitle: 'Typing…' } } });
+    await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: 3, doc: grown } });
+
+    // Newest first, with how big the course was at each save.
+    const history = (await request(catalog, 'GET', url(draft.id, '/history'), L(author))).body as { items: { revision: number; modules: number; items: number; savedBy: { name: string } }[] };
+    expect(history.items.map((s) => s.revision)).toEqual([4, 2, 1]);
+    expect(history.items[0]).toMatchObject({ modules: 1, items: course.modules[0]!.items.length + 1, savedBy: { name: expect.any(String) } });
+    expect(history.items[2]).toMatchObject({ modules: 0, items: 0 });
+    expect(((await request(catalog, 'GET', url(draft.id, '/history/2'), L(author))).body as { doc: { title: string } }).doc.title).toBe('Lost-wax History');
+    expect((await request(catalog, 'GET', url(draft.id, '/history/99'), L(author))).status).toBe(404);
+    expect((await request(catalog, 'GET', url(draft.id, '/history'), L(outsider))).status).toBe(404);
+
+    // Restoring makes an earlier save the newest; the current one stays in the history.
+    expect((await request(catalog, 'POST', url(draft.id, '/restore'), { ...L(author), body: { revision: 3, restore: 2 } })).body).toMatchObject({ code: 'draft_changed' });
+    const restored = await request(catalog, 'POST', url(draft.id, '/restore'), { ...L(author), body: { revision: 4, restore: 2 } });
+    expect(restored.status).toBe(200);
+    expect((restored.body as Draft).revision).toBe(5);
+    expect(((restored.body as Draft).doc as { modules: { items: unknown[] }[] }).modules[0]!.items).toHaveLength(course.modules[0]!.items.length);
+    expect(((await request(catalog, 'GET', url(draft.id, '/history'), L(author))).body as { items: { revision: number }[] }).items.map((s) => s.revision)).toEqual([5, 4, 2, 1]);
+    expect((await request(catalog, 'DELETE', url(draft.id), L(author))).status).toBe(204);
+  });
+
   it('a reviewer asks for changes, then publishes; members see the private course, others do not', async () => {
     const [draft] = ((await request(catalog, 'GET', '/v1/catalog/authoring', L(author))).body as { newDrafts: Draft[] }).newDrafts;
     expect((await request(catalog, 'POST', url(draft!.id, '/submit'), { ...L(author), body: {} })).body).toMatchObject({ status: 'in_review' });
