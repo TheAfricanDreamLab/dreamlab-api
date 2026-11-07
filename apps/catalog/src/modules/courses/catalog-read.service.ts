@@ -104,7 +104,7 @@ export class CatalogReadService {
         course: { slug: row.slug, title: row.title },
         module: { key: m.key, title: m.title, position: m.position },
         item: { key: item.key, type: item.type, title: item.title, minutes: item.minutes },
-        content: toDeliveryContent(item.authoring, `preview:${row.id}`),
+        content: hideMatches(toDeliveryContent(item.authoring, `preview:${row.id}`)),
       };
     }
     throw notFound('preview_not_found', 'This part of the course is not open for preview.');
@@ -286,4 +286,16 @@ export class CatalogReadService {
       };
     });
   }
+}
+
+/**
+ * A preview's answers are never checked, so "match" blocks get fresh ids on their right-hand side:
+ * the shared pair ids would otherwise show which sides go together.
+ */
+function hideMatches(content: PreviewItem['content']): PreviewItem['content'] {
+  const blind = <B extends { type: string }>(b: B): B =>
+    b.type === 'match' ? ({ ...b, right: (b as unknown as { right: { id: string; text: string }[] }).right.map((r, i) => ({ id: `r${i + 1}`, text: r.text })) } as B) : b;
+  if (content.type === 'lesson') return { ...content, steps: content.steps.map((s) => ({ ...s, blocks: s.blocks.map(blind) })) };
+  if (content.type === 'quiz') return { ...content, questions: content.questions.map(blind) };
+  return content;
 }

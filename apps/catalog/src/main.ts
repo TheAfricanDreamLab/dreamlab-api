@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { CONTRACTS_VERSION } from '@dreamlab/contracts';
 import { createHttpApp, installGatewayTrust, setupSwagger } from '@lib/common';
@@ -25,6 +26,8 @@ async function bootstrap(): Promise<void> {
   // The video worker runs in its own container (CAT-6): no HTTP, no migrations (the API runs those).
   if (role === 'video-worker') {
     const worker = await NestFactory.createApplicationContext(VideoWorkerModule.forRoot(config), { bufferLogs: true });
+    // The app logger, which also flushes what was buffered while starting.
+    worker.useLogger(worker.get(PinoLogger));
     worker.enableShutdownHooks();
     worker.get(VideoWorker).start();
     return;
