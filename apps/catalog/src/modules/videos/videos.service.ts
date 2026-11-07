@@ -225,8 +225,8 @@ export class VideosService {
       if (!v || v.ownerOrgId !== ownerOrgId) return [{ path, message: 'This video is not in the library any more: choose another' }];
       if (v.status === 'failed') return [{ path, message: 'This video could not be processed: open the library to try again or replace it' }];
       if (v.status !== 'ready') return [{ path, message: 'This video is still being processed: it can be published once it is ready' }];
-      // Questions and chapters must fall inside the video, whatever length the block says it is.
-      if (typeof block.durationS === 'number' || !v.durationS) return [];
+      // Questions and chapters must fall inside the processed video, whatever length the block says it is.
+      if (!v.durationS) return [];
       const late = (list: unknown, field: string) =>
         (Array.isArray(list) ? list : []).flatMap((x: { atS?: unknown }, k) =>
           typeof x?.atS === 'number' && x.atS >= v.durationS! ? [{ path: [...at, field, k, 'atS'].join('.'), message: 'After the end of the video' }] : [],

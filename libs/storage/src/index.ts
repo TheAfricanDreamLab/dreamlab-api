@@ -168,9 +168,13 @@ export class BlobStorage {
     await blob.commitBlockList(blockIds, { blobHTTPHeaders: { blobContentType: contentType } });
   }
 
-  async downloadToFile(visibility: Visibility, path: string, file: string): Promise<void> {
+  /**
+   * Saves a blob to a local file. `maxBytes` caps what is read, whatever the blob has grown to since
+   * it was checked (an upload link can still be in someone's hands).
+   */
+  async downloadToFile(visibility: Visibility, path: string, file: string, maxBytes?: number): Promise<void> {
     const blob = this.require().service.getContainerClient(this.container(visibility)).getBlobClient(path);
-    await blob.downloadToFile(file);
+    await blob.downloadToFile(file, 0, maxBytes);
   }
 
   /** Writes a local file or some bytes to a blob, replacing what was there. */

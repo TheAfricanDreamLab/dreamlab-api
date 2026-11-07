@@ -184,7 +184,8 @@ export class VideoWorker implements OnApplicationShutdown {
     if (!video) return;
     await this.progress(video.id, 0, 'processing');
     const src = join(dir, 'source');
-    await this.storage.downloadToFile('private', sourcePath(video.id), src);
+    // Only the bytes that were checked when the upload finished.
+    await this.storage.downloadToFile('private', sourcePath(video.id), src, video.size);
     const probe = await this.probe(src, signal);
     const heights = renditionsFor(probe.height);
     const out = join(dir, 'out');
@@ -277,7 +278,8 @@ export class VideoWorker implements OnApplicationShutdown {
     const [video] = await this.db.sys.select().from(videos).where(eq(videos.id, job.videoId));
     if (!video) return;
     const src = join(dir, 'source');
-    await this.storage.downloadToFile('private', sourcePath(video.id), src);
+    // Only the bytes that were checked when the upload finished.
+    await this.storage.downloadToFile('private', sourcePath(video.id), src, video.size);
     const wav = join(dir, 'audio.wav');
     try {
       await this.run(this.config.FFMPEG_PATH, ['-hide_banner', '-nostdin', '-y', '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], signal);
@@ -320,10 +322,13 @@ export class VideoWorker implements OnApplicationShutdown {
       .where(and(eq(videoCaptions.videoId, video.id), eq(videoCaptions.lang, code), ne(videoCaptions.source, 'auto')));
     if (own) throw new FinalError(`This video already has ${CAPTION_LANGUAGES[code] ?? code} captions that were uploaded or edited. Remove them first to make new ones automatically.`);
     const values = { label: `${CAPTION_LANGUAGES[code] ?? code} (automatic)`, source: 'auto' as const, cues, updatedByUserId: job.requestedByUserId, updatedAt: new Date() };
-    await this.db.sys
+    // In one statement: an author's track saved while this ran is never replaced.
+    const written = await this.db.sys
       .insert(videoCaptions)
       .values({ videoId: video.id, lang: code, ownerOrgId: video.ownerOrgId, ...values })
-      .onConflictDoUpdate({ target: [videoCaptions.videoId, videoCaptions.lang], set: values });
+      .onConflictDoUpdate({ target: [videoCaptions.videoId, videoCaptions.lang], set: values, setWhere: eq(videoCaptions.source, 'auto') })
+      .returning({ lang: videoCaptions.lang });
+    if (!written.length) throw new FinalError(`${CAPTION_LANGUAGES[code] ?? code} captions were uploaded or edited while these were being made, so they were kept.`);
     await writeCaptions(this.storage, video.id, code, cues);
     // Earlier failed attempts are no longer news.
     await this.db.sys
