@@ -134,6 +134,53 @@ export class BlobStorage {
     }
   }
 
+  // ---------- large files in blocks (the video library, CAT-6) ----------
+
+  /**
+   * A link to upload one blob in blocks (Put Block, `&comp=block&blockid=…`), valid for `hours`. The
+   * service joins the blocks (`commitBlocks`) once they have all arrived, after checking them.
+   */
+  blockUploadLink(visibility: Visibility, path: string, hours: number): { url: string; expiresAt: string } {
+    const { service, credential } = this.require();
+    const container = this.container(visibility);
+    const expiresOn = new Date(Date.now() + hours * 3_600_000);
+    const sas = generateBlobSASQueryParameters(
+      { containerName: container, blobName: path, permissions: BlobSASPermissions.parse('cw'), startsOn: new Date(Date.now() - 60_000), expiresOn },
+      credential,
+    );
+    return { url: `${service.getContainerClient(container).getBlockBlobClient(path).url}?${sas.toString()}`, expiresAt: expiresOn.toISOString() };
+  }
+
+  /** Blocks uploaded but not yet joined (storage keeps them for a week). */
+  async uncommittedBlocks(visibility: Visibility, path: string): Promise<{ name: string; size: number }[]> {
+    const blob = this.require().service.getContainerClient(this.container(visibility)).getBlockBlobClient(path);
+    try {
+      const list = await blob.getBlockList('uncommitted');
+      return (list.uncommittedBlocks ?? []).map((b) => ({ name: b.name, size: b.size }));
+    } catch (err) {
+      if (err instanceof RestError && err.statusCode === 404) return [];
+      throw err;
+    }
+  }
+
+  async commitBlocks(visibility: Visibility, path: string, blockIds: string[], contentType: string): Promise<void> {
+    const blob = this.require().service.getContainerClient(this.container(visibility)).getBlockBlobClient(path);
+    await blob.commitBlockList(blockIds, { blobHTTPHeaders: { blobContentType: contentType } });
+  }
+
+  async downloadToFile(visibility: Visibility, path: string, file: string): Promise<void> {
+    const blob = this.require().service.getContainerClient(this.container(visibility)).getBlobClient(path);
+    await blob.downloadToFile(file);
+  }
+
+  /** Writes a local file or some bytes to a blob, replacing what was there. */
+  async put(visibility: Visibility, path: string, body: { file: string } | { data: string | Buffer }, contentType: string, cacheControl?: string): Promise<void> {
+    const blob = this.require().service.getContainerClient(this.container(visibility)).getBlockBlobClient(path);
+    const headers = { blobHTTPHeaders: { blobContentType: contentType, ...(cacheControl ? { blobCacheControl: cacheControl } : {}) } };
+    if ('file' in body) await blob.uploadFile(body.file, { ...headers, concurrency: 4 });
+    else await blob.upload(body.data, Buffer.byteLength(body.data), headers);
+  }
+
   async remove(visibility: Visibility, path: string): Promise<void> {
     const { service } = this.require();
     await service.getContainerClient(this.container(visibility)).getBlobClient(path).deleteIfExists();

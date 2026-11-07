@@ -4,6 +4,10 @@ import { BlobStorage } from '@lib/storage';
 import type { CatalogConfig } from '../../config';
 import { AuthoringController } from '../authoring/authoring.controller';
 import { AuthoringService, STORAGE } from '../authoring/authoring.service';
+import { CollabService } from '../authoring/collab.service';
+import { VideosController } from '../videos/videos.controller';
+import { VideosService } from '../videos/videos.service';
+import { VideoWorker } from '../videos/video-worker';
 import { InstructorsController } from '../instructors/instructors.controller';
 import { InstructorsService } from '../instructors/instructors.service';
 import { SeedModule } from '../seed/seed.module';
@@ -17,15 +21,18 @@ import { CoursesController } from './courses.controller';
 
 @Module({
   imports: [SeedModule],
-  controllers: [CoursesController, ProgramsController, CatalogAdminController, CatalogRpcController, AuthoringController, InstructorsController],
+  controllers: [CoursesController, ProgramsController, CatalogAdminController, CatalogRpcController, AuthoringController, InstructorsController, VideosController],
   providers: [
     CatalogReadService,
     ProgramsService,
     CatalogAdminService,
     AuthoringService,
+    CollabService,
+    VideosService,
+    VideoWorker,
     InstructorsService,
     { provide: STORAGE, inject: [CONFIG], useFactory: (c: CatalogConfig) => new BlobStorage(c) },
   ],
-  exports: [CatalogReadService, STORAGE],
+  exports: [CatalogReadService, STORAGE, VideoWorker, VideosService],
 })
 export class CoursesModule {}

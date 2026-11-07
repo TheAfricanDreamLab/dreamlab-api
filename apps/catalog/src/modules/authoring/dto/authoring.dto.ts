@@ -1,5 +1,10 @@
 import {
+  AddCommentSchema,
   AuthoringOverviewSchema,
+  DraftCommentSchema,
+  HeartbeatSchema,
+  PresenceSchema,
+  UpdateCommentSchema,
   CourseMediaUploadRequestSchema,
   CourseMediaUploadSchema,
   CreateDraftSchema,
@@ -28,3 +33,10 @@ export class DraftHistoryDto extends createZodDto(z.object({ items: z.array(Draf
 export class DraftHistoryDocDto extends createZodDto(z.object({ revision: z.number().int(), doc: z.record(z.unknown()) })) {}
 export class DraftRevisionParamsDto extends createZodDto(z.object({ draftId: UuidSchema, revision: z.coerce.number().int().min(1) })) {}
 export class RestoreDraftDto extends createZodDto(RestoreDraftSchema) {}
+export class CommentDto extends createZodDto(DraftCommentSchema) {}
+export class CommentListDto extends createZodDto(z.object({ items: z.array(DraftCommentSchema) })) {}
+export class AddCommentDto extends createZodDto(AddCommentSchema) {}
+export class UpdateCommentDto extends createZodDto(UpdateCommentSchema) {}
+export class CommentParamsDto extends createZodDto(z.object({ draftId: UuidSchema, commentId: UuidSchema })) {}
+export class HeartbeatDto extends createZodDto(HeartbeatSchema) {}
+export class PresenceListDto extends createZodDto(z.object({ people: z.array(PresenceSchema) })) {}

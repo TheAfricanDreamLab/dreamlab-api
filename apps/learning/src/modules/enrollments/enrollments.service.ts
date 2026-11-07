@@ -157,7 +157,7 @@ export class EnrollmentsService {
           title: m.title,
           summary: m.summary,
           weekNo: m.weekNo,
-          items: m.items.map((i) => ({ id: i.id, key: i.key, type: i.type, title: i.title, minutes: i.minutes, required: i.required })),
+          items: m.items.map((i) => ({ id: i.id, key: i.key, type: i.type, title: i.title, minutes: i.minutes, required: i.required, preview: i.authoring.preview === true })),
         })),
       },
       enrollment: toEnrollment(enrollment),

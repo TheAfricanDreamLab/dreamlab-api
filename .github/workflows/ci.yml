@@ -41,6 +41,8 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The video worker's tests convert a real clip (CAT-6).
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: pnpm test:e2e
 
   # Builds every image; on main also publishes ghcr.io/<org>/dreamlab-<app>:sha-<short> and :main.
@@ -73,6 +75,8 @@ jobs:
         with:
           context: .
           build-args: APP=${{ matrix.app }}
+          # The catalog image carries ffmpeg and whisper.cpp for its video worker.
+          target: ${{ matrix.app == 'catalog' && 'catalog' || 'runtime' }}
           push: ${{ env.PUBLISH == 'true' }}
           tags: ${{ env.PUBLISH == 'true' && steps.names.outputs.tags || format('dreamlab-{0}:ci', matrix.app) }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}

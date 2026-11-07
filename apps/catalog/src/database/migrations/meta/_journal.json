@@ -50,6 +50,13 @@
       "when": 1793890168590,
       "tag": "0006_draft_history",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794055832921,
+      "tag": "0007_video_library",
+      "breakpoints": true
     }
   ]
 }
