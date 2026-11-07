@@ -534,6 +534,13 @@ describe('learning journey', () => {
       // Wind the clock forward: the end has passed.
       const iamDb = iam.get<DatabaseService<typeof iamSchema>>(DATABASE);
       await iamDb.sys.update(iamSchema.users).set({ suspendedUntil: new Date(Date.now() - 1000) }).where(eq(iamSchema.users.id, kwameId));
+      // Code sign-in works straight away, before anyone opens an admin page (which would lift it too).
+      const codesBefore = notifier.otps.filter((o) => o.destination === 'kwame@example.com').length;
+      expect((await request(iam, 'POST', '/v1/auth/otp', { body: { identifier: 'kwame@example.com', purpose: 'login' } })).status).toBeLessThan(300);
+      const codes = notifier.otps.filter((o) => o.destination === 'kwame@example.com');
+      expect(codes).toHaveLength(codesBefore + 1);
+      const viaCode = await request(iam, 'POST', '/v1/auth/login/otp', { body: { identifier: 'kwame@example.com', code: codes.at(-1)!.code } });
+      expect(viaCode.status).toBe(200);
       expect((await signIn()).status).toBe(200);
       expect((await request(iam, 'GET', `/v1/platform/users/${kwameId}`, L(admin))).body).toMatchObject({ status: 'active', suspendedUntil: null });
 

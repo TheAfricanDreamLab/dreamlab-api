@@ -41,7 +41,7 @@ import { PERSONAL, SessionIssuer, TokenContext } from './services/session-issuer
 import { SessionRow, SessionsService } from './services/sessions.service';
 import { SsoPolicy } from './services/sso-policy.service';
 import { TokenService } from './services/token.service';
-import { assertCanSignIn } from '../users/account-standing';
+import { assertCanSignIn, suspensionEnded } from '../users/account-standing';
 
 /** A registration's password waits here until verify (see register); a day covers a late code. */
 export const pendingPasswordKey = (userId: string): string => `iam:pending-pw:${userId}`;
@@ -123,7 +123,8 @@ export class AuthService {
     const user = await this.users.findByIdentifier(identifier);
     const eligible =
       user !== null &&
-      user.status === 'active' &&
+      // A suspension whose end has passed counts as active: sign-in lifts it (PLT-2).
+      (user.status === 'active' || suspensionEnded(user)) &&
       (purpose === 'verify' ? !UsersRepository.isVerified(user, identifier) : true);
     if (eligible) {
       try {
