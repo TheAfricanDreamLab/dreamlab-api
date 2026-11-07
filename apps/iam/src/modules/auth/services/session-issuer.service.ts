@@ -11,6 +11,7 @@ import { AuthzService } from '../../authz/authz.service';
 import type { UserRow } from '../../users/users.repository';
 import { SessionRow, SessionsService } from './sessions.service';
 import { TokenService } from './token.service';
+import { assertCanSignIn, suspensionEnded } from '../../users/account-standing';
 
 export interface TokenContext {
   orgId: string | null;
@@ -53,8 +54,17 @@ export class SessionIssuer {
     options: { mfa?: boolean; orgId?: string | null } = {},
   ): Promise<TokenResponse> {
     // Every sign-in path (password, codes, Google, SSO, MFA) ends here: suspended people get no session.
-    const [account] = await tx.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, user.id));
-    if (account?.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
+    const [account] = await tx
+      .select({ status: schema.users.status, until: schema.users.suspendedUntil, message: schema.users.statusMessage })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id));
+    if (!account) throw forbidden('account_disabled', 'This account is disabled');
+    const standing = { status: account.status, suspendedUntil: account.until, statusMessage: account.message };
+    assertCanSignIn(standing);
+    if (suspensionEnded(standing)) {
+      // The suspension has run its course (PLT-2).
+      await tx.update(schema.users).set({ status: 'active', suspendedUntil: null }).where(eq(schema.users.id, user.id));
+    }
     // Asked for (switch, SSO) > the organisation's own site > where the person last worked.
     const preferred = options.orgId !== undefined ? options.orgId : (meta.tenantOrgId ?? (await this.lastOrg(tx, user.id)));
     const context = await this.resolveContext(user.id, preferred);

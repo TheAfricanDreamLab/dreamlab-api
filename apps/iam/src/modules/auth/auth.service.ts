@@ -41,6 +41,7 @@ import { PERSONAL, SessionIssuer, TokenContext } from './services/session-issuer
 import { SessionRow, SessionsService } from './services/sessions.service';
 import { SsoPolicy } from './services/sso-policy.service';
 import { TokenService } from './services/token.service';
+import { assertCanSignIn } from '../users/account-standing';
 
 /** A registration's password waits here until verify (see register); a day covers a late code. */
 export const pendingPasswordKey = (userId: string): string => `iam:pending-pw:${userId}`;
@@ -422,7 +423,7 @@ export class AuthService {
   }
 
   private assertActive(user: UserRow): void {
-    if (user.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
+    assertCanSignIn(user);
   }
 }
 

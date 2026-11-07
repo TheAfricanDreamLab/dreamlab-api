@@ -30,6 +30,7 @@ class CapturingNotifier implements Notifier {
   async sendOtp(m: OtpMessage) {
     this.otps.push(m);
   }
+  async sendAccountNotice() {}
   async sendInvitation(m: { destination: string; acceptUrl: string }) {
     this.invitations.push(m);
   }

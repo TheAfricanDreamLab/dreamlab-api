@@ -12,7 +12,16 @@ export const users = pgTable(
     phone: text('phone'),
     fullName: text('full_name').notNull(),
     locale: text('locale').notNull().default('en'),
-    status: text('status', { enum: ['active', 'suspended', 'deleted'] }).notNull().default('active'),
+    status: text('status', { enum: ['active', 'suspended', 'banned', 'deleted'] }).notNull().default('active'),
+    /**
+     * Standing (PLT-2): a suspension lifts itself at `suspendedUntil` (null: when a platform admin lets
+     * them back in). The last change's reason (for admins), message (for the person), who and when.
+     */
+    suspendedUntil: timestamp('suspended_until', { withTimezone: true }),
+    statusReason: text('status_reason'),
+    statusMessage: text('status_message'),
+    statusChangedByUserId: uuid('status_changed_by_user_id'),
+    statusChangedAt: timestamp('status_changed_at', { withTimezone: true }),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     /** Incremented whenever the user's memberships or roles change; tokens carry it as `azv`. */

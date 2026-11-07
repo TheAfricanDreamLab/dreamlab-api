@@ -24,6 +24,7 @@ import { lockUserRow, UsersRepository } from '../../users/users.repository';
 import { OidcClient, OidcError } from '../providers/oidc.client';
 import { SamlClient } from '../providers/saml.client';
 import { OIDC_CLIENT, samlEntityId, serviceProvider } from './sso-connections.service';
+import { assertCanSignIn } from '../../users/account-standing';
 
 const STATE_TTL_SECONDS = 600;
 const DONE_TTL_SECONDS = 120;
@@ -228,7 +229,7 @@ export class SsoSignInService {
         // Nobody had proven this address; a password set on it may not be the owner's.
         await tx.delete(userIdentities).where(and(eq(userIdentities.userId, user.id), eq(userIdentities.provider, 'password')));
       }
-      if (user.status !== 'active') throw forbidden('account_disabled', 'This account is disabled');
+      assertCanSignIn(user);
       if (!user.emailVerifiedAt && user.email?.toLowerCase() === identity.email) await this.users.markVerified(tx, user.id, identity.email!);
       await tx
         .insert(userIdentities)

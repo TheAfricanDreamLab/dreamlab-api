@@ -36,6 +36,7 @@ class CapturingNotifier implements Notifier {
     this.otps.push(m);
   }
   async sendInvitation() {}
+  async sendAccountNotice() {}
   last(destination: string) {
     return [...this.otps].reverse().find((o) => o.destination === destination);
   }

@@ -38,6 +38,7 @@ import { EMAIL_SENDER } from '../apps/notify/src/modules/notifications/notificat
 
 class CapturingNotifier implements Notifier {
   otps: OtpMessage[] = [];
+  async sendAccountNotice() {}
   async sendOtp(m: OtpMessage) {
     this.otps.push(m);
   }

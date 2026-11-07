@@ -51,6 +51,7 @@ import type { EmailMessage, EmailSender } from '@lib/email';
 import { type LiveRole, MeetKit } from '@lib/meet-kit';
 import type { BlobStorage } from '@lib/storage';
 import { E2E_GATEWAY_TOKEN, eventually, request, testEnv } from '@lib/testing';
+import { eq } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { Logger } from 'nestjs-pino';
 import { CatalogAppModule } from '../apps/catalog/src/app.module';
@@ -63,7 +64,8 @@ import { DATASETS } from '../apps/catalog/src/modules/seed/datasets';
 import { IamAppModule } from '../apps/iam/src/app.module';
 import { iamConfigSchema } from '../apps/iam/src/config';
 import { iamMigrationsFolder } from '../apps/iam/src/database';
-import type { Notifier, OtpMessage } from '../apps/iam/src/modules/notifications/interfaces/notifier.interface';
+import type { AccountNotice, Notifier, OtpMessage } from '../apps/iam/src/modules/notifications/interfaces/notifier.interface';
+import { schema as iamSchema } from '../apps/iam/src/database';
 import { NOTIFIER } from '../apps/iam/src/modules/notifications/notifier.service';
 import { SeedService } from '../apps/iam/src/modules/seed/seed.service';
 import { LearningAppModule } from '../apps/learning/src/app.module';
@@ -85,6 +87,10 @@ import { EMAIL_SENDER } from '../apps/notify/src/modules/notifications/notificat
 
 class CapturingNotifier implements Notifier {
   otps: OtpMessage[] = [];
+  notices: AccountNotice[] = [];
+  async sendAccountNotice(m: AccountNotice) {
+    this.notices.push(m);
+  }
   async sendOtp(m: OtpMessage) {
     this.otps.push(m);
   }
@@ -505,13 +511,43 @@ describe('learning journey', () => {
 
     it('suspends a person: their sessions end at once and they cannot sign in; reactivating restores access', async () => {
       const kwameId = ((await request(iam, 'GET', '/v1/platform/users?q=kwame', L(admin))).body as { items: { id: string }[] }).items[0]!.id;
-      const suspended = await request(iam, 'POST', `/v1/platform/users/${kwameId}/status`, { ...L(admin), body: { status: 'suspended', reason: 'Spam in discussions' } });
-      expect(suspended).toMatchObject({ status: 200, body: { status: 'suspended', activeSessions: 0 } });
+      const status = (body: Record<string, unknown>) => request(iam, 'POST', `/v1/platform/users/${kwameId}/status`, { ...L(admin), body });
+      const signIn = () => request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'kwame@example.com', password: 'correct horse battery' } });
+      notifier.notices.length = 0;
+
+      // Open suspension, with a message for the person.
+      const suspended = await status({ status: 'suspended', reason: 'Spam in discussions', message: 'Please read the community rules.' });
+      expect(suspended).toMatchObject({
+        status: 200,
+        body: { status: 'suspended', suspendedUntil: null, activeSessions: 0, statusChange: { status: 'suspended', reason: 'Spam in discussions', message: 'Please read the community rules.', until: null } },
+      });
+      expect((suspended.body as { statusChange: { by: { name: string } } }).statusChange.by).not.toBeNull();
       expect((await request(learning, 'GET', '/v1/learning/enrollments', L(kwame))).status).toBe(401);
-      const login = await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'kwame@example.com', password: 'correct horse battery' } });
-      expect(login).toMatchObject({ status: 403, body: { code: 'account_disabled' } });
-      await request(iam, 'POST', `/v1/platform/users/${kwameId}/status`, { ...L(admin), body: { status: 'active', reason: 'Appeal accepted' } });
-      expect((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'kwame@example.com', password: 'correct horse battery' } })).status).toBe(200);
+      expect(await signIn()).toMatchObject({ status: 403, body: { code: 'account_suspended', details: { status: 'suspended', until: null, message: 'Please read the community rules.' } } });
+      expect(notifier.notices.at(-1)).toMatchObject({ destination: 'kwame@example.com', status: 'suspended', until: null });
+
+      // A timed suspension shows its end; once it has passed it lifts itself.
+      const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
+      expect((await status({ status: 'suspended', reason: 'A week out', until, notify: false })).body).toMatchObject({ status: 'suspended', suspendedUntil: until });
+      expect(await signIn()).toMatchObject({ status: 403, body: { code: 'account_suspended', details: { until } } });
+      expect((await request(iam, 'GET', '/v1/platform/users?status=suspended', L(admin))).body).toMatchObject({ items: [{ id: kwameId, suspendedUntil: until }] });
+      // Wind the clock forward: the end has passed.
+      const iamDb = iam.get<DatabaseService<typeof iamSchema>>(DATABASE);
+      await iamDb.sys.update(iamSchema.users).set({ suspendedUntil: new Date(Date.now() - 1000) }).where(eq(iamSchema.users.id, kwameId));
+      expect((await signIn()).status).toBe(200);
+      expect((await request(iam, 'GET', `/v1/platform/users/${kwameId}`, L(admin))).body).toMatchObject({ status: 'active', suspendedUntil: null });
+
+      // Banned: closed, counted, and filterable; reinstating lets them back in.
+      expect((await status({ status: 'banned', reason: 'Repeated fraud' })).body).toMatchObject({ status: 'banned', activeSessions: 0 });
+      expect(await signIn()).toMatchObject({ status: 403, body: { code: 'account_banned', details: { status: 'banned', until: null } } });
+      expect(notifier.notices.at(-1)).toMatchObject({ status: 'banned' });
+      expect((await request(iam, 'GET', '/v1/platform/overview', L(admin))).body).toMatchObject({ users: { banned: 1 } });
+      expect((await request(iam, 'GET', '/v1/platform/users?status=banned', L(admin))).body).toMatchObject({ items: [{ id: kwameId, status: 'banned' }] });
+      expect((await status({ status: 'banned', reason: 'x', until })).status).toBe(400);
+
+      await status({ status: 'active', reason: 'Appeal accepted' });
+      expect(notifier.notices.at(-1)).toMatchObject({ status: 'active' });
+      expect((await signIn()).status).toBe(200);
     });
 
     it('hides, features and imports courses; enrolled learners stay on their version', async () => {

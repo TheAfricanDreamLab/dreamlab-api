@@ -45,6 +45,6 @@ export class PlatformController {
   @ApiOperation({ summary: r.setUserStatus.summary })
   @ZodResponse({ status: 200, type: PlatformUserDetailDto })
   setStatus(@Param() p: UserParamsDto, @Body() dto: SetUserStatusDto, @CurrentPrincipal() principal: Principal, @Meta() meta: RequestMeta) {
-    return this.platform.setStatus(principal, p.userId, dto.status, dto.reason, meta.requestId ?? undefined);
+    return this.platform.setStatus(principal, p.userId, dto, meta.requestId ?? undefined);
   }
 }

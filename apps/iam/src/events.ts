@@ -8,6 +8,7 @@ export const IamEvents = {
   UserMfaDisabled: 'user.mfa_disabled',
   UserSuspended: 'user.suspended',
   UserReactivated: 'user.reactivated',
+  UserBanned: 'user.banned',
   SessionCreated: 'session.created',
   SessionRevoked: 'session.revoked',
   OrgCreated: 'org.created',
