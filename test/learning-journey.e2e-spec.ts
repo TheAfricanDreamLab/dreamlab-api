@@ -8,7 +8,11 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { Test } from '@nestjs/testing';
 import { isAppRoute, type AppRoute, type AppRouter } from '@ts-rest/core';
 import { AccessToken } from 'livekit-server-sdk';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   AdmissionCycle,
   apiV1Contract,
@@ -17,6 +21,11 @@ import {
   BlockResponse,
   CohortDetail,
   Draft,
+  DraftComment,
+  LibraryVideo,
+  Presence,
+  VideoUploadLink,
+  videoBlockId,
   CourseAuthoringSchema,
   CourseProgress,
   Enrollment,
@@ -48,6 +57,8 @@ import { CatalogAppModule } from '../apps/catalog/src/app.module';
 import { catalogConfigSchema } from '../apps/catalog/src/config';
 import { catalogMigrationsFolder } from '../apps/catalog/src/database';
 import { CatalogSeedService } from '../apps/catalog/src/modules/seed/catalog-seed.service';
+import { STORAGE as CATALOG_STORAGE } from '../apps/catalog/src/modules/authoring/authoring.service';
+import { VideoWorker } from '../apps/catalog/src/modules/videos/video-worker';
 import { DATASETS } from '../apps/catalog/src/modules/seed/datasets';
 import { IamAppModule } from '../apps/iam/src/app.module';
 import { iamConfigSchema } from '../apps/iam/src/config';
@@ -1010,6 +1021,155 @@ describe('course authoring in the browser (CAT-3)', () => {
     await notificationsFor(admin, (n) => n.category === 'authoring' && n.title.includes('ready for review'));
     // An author is never told about their own submission.
     expect(forAuthor.some((n) => n.title.includes('ready for review'))).toBe(false);
+  });
+
+  // ---------- CAT-6: the video library, captions, free previews, review comments and presence ----------
+
+  describe('videos and working together (CAT-6)', () => {
+    const videos = '/v1/catalog/authoring/videos';
+    const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
+    let clip: Buffer;
+    let videoId: string;
+
+    beforeAll(() => {
+      if (!hasFfmpeg) return;
+      // Four seconds of 720p picture and sound, made here so the test needs no fixture file.
+      const out = join(tmpdir(), `cat6-${Date.now()}.mp4`);
+      const made = spawnSync('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=4:size=1280x720:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', out]);
+      expect(made.status).toBe(0);
+      clip = readFileSync(out);
+    });
+
+    it('uploads a video in blocks, refuses to join it until every block is there, and processes it for streaming', async () => {
+      expect((await request(catalog, 'GET', videos, L(outsider))).status).toBe(403);
+      const size = hasFfmpeg ? clip.length : 1000;
+      const created = await request(catalog, 'POST', videos, { ...L(author), body: { title: 'Pouring the bronze', fileName: 'pour.mp4', contentType: 'video/mp4', size } });
+      expect(created.status).toBe(201);
+      const { video, upload } = created.body as { video: LibraryVideo; upload: VideoUploadLink };
+      videoId = video.id;
+      expect(video).toMatchObject({ status: 'uploading', captions: [], usedIn: [] });
+      expect(upload).toMatchObject({ blocks: 1, blockBytes: 8 * 1024 * 1024 });
+      expect((await request(catalog, 'GET', `${videos}/${videoId}/upload-status`, L(author))).body).toEqual({ received: [], blocks: 1 });
+      expect((await request(catalog, 'POST', `${videos}/${videoId}/uploaded`, { ...L(author), body: {} })).body).toMatchObject({ code: 'upload_incomplete' });
+      // Another organisation's people can't see it.
+      expect((await request(catalog, 'GET', `${videos}/${videoId}`, L(admin))).status).toBe(404);
+      if (!hasFfmpeg) return;
+
+      const put = await fetch(`${upload.url}&comp=block&blockid=${encodeURIComponent(videoBlockId(0))}`, { method: 'PUT', body: new Uint8Array(clip) });
+      expect(put.status).toBe(201);
+      expect((await request(catalog, 'GET', `${videos}/${videoId}/upload-status`, L(author))).body).toEqual({ received: [0], blocks: 1 });
+      expect((await request(catalog, 'POST', `${videos}/${videoId}/uploaded`, { ...L(author), body: {} })).body).toMatchObject({ status: 'queued', progress: 0 });
+
+      expect(await catalog.get(VideoWorker).runOnce()).toBe(true);
+      const ready = (await request(catalog, 'GET', `${videos}/${videoId}`, L(author))).body as LibraryVideo;
+      expect(ready).toMatchObject({ status: 'ready', durationS: 4, width: 1280, height: 720, renditions: [360, 720], manifestUrl: `/media/videos/${videoId}/manifest.json`, posterUrl: `/media/videos/${videoId}/v1/poster.jpg` });
+      const storage = catalog.get<BlobStorage>(CATALOG_STORAGE);
+      for (const file of ['manifest.json', 'v1/master.m3u8', 'v1/360p/index.m3u8', 'v1/720p/index.m3u8', 'v1/poster.jpg', 'v1/thumb.jpg']) expect(await storage.stat('public', `videos/${videoId}/${file}`)).not.toBeNull();
+      // The original stays private.
+      expect(await storage.stat('public', `videos/${videoId}/source`)).toBeNull();
+      expect(((await request(catalog, 'GET', `${videos}?q=bronze`, L(author))).body as { items: LibraryVideo[] }).items.map((v) => v.id)).toEqual([videoId]);
+    });
+
+    it('keeps caption tracks, and reports when automatic captions cannot be made', async () => {
+      if (!hasFfmpeg) return;
+      const cues = [
+        { startS: 0.5, endS: 2, text: 'Heat the crucible.' },
+        { startS: 2.2, endS: 3.8, text: 'Pour in one smooth movement.' },
+      ];
+      const saved = await request(catalog, 'PUT', `${videos}/${videoId}/captions/en`, { ...L(author), body: { label: 'English', cues, fromFile: true } });
+      expect((saved.body as LibraryVideo).captions).toEqual([expect.objectContaining({ lang: 'en', label: 'English', source: 'upload', cues: 2 })]);
+      expect((await request(catalog, 'GET', `${videos}/${videoId}/captions/en`, L(author))).body).toEqual({ lang: 'en', label: 'English', cues });
+      const edited = await request(catalog, 'PUT', `${videos}/${videoId}/captions/en`, { ...L(author), body: { label: 'English', cues: [cues[0]!], fromFile: false } });
+      expect((edited.body as LibraryVideo).captions[0]).toMatchObject({ source: 'edited', cues: 1 });
+      expect(await catalog.get<BlobStorage>(CATALOG_STORAGE).stat('public', `videos/${videoId}/captions/en.vtt`)).not.toBeNull();
+      // Uploaded or edited captions are never overwritten by speech recognition.
+      expect((await request(catalog, 'POST', `${videos}/${videoId}/captions-auto`, { ...L(author), body: { lang: 'en' } })).body).toMatchObject({ code: 'captions_exist' });
+
+      const asked = await request(catalog, 'POST', `${videos}/${videoId}/captions-auto`, { ...L(author), body: { lang: 'fr' } });
+      expect((asked.body as LibraryVideo).captionJob).toMatchObject({ status: 'queued', lang: 'fr' });
+      expect((await request(catalog, 'POST', `${videos}/${videoId}/captions-auto`, { ...L(author), body: { lang: 'fr' } })).body).toMatchObject({ code: 'captions_in_progress' });
+      await catalog.get(VideoWorker).runOnce();
+      const after = (await request(catalog, 'GET', `${videos}/${videoId}`, L(author))).body as LibraryVideo;
+      // This test server has no speech-recognition model: the author hears why, in plain words.
+      expect(after.captionJob).toMatchObject({ status: 'failed', error: expect.stringContaining('not available on this server') });
+      expect((await request(catalog, 'PATCH', `${videos}/${videoId}`, { ...L(author), body: { title: 'Pouring the bronze (take 2)' } })).body).toMatchObject({ title: 'Pouring the bronze (take 2)' });
+    });
+
+    it('publishes only processed library videos, opens free-preview lessons to visitors, and protects videos in use', async () => {
+      if (!hasFfmpeg) return;
+      const draft = (await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { courseSlug: slug } })).body as Draft;
+      const doc = structuredClone(draft.doc) as ReturnType<typeof fullCourse>;
+      const carving = doc.modules[0]!.items[0]! as ReturnType<typeof lessonItem> & { preview?: boolean };
+      carving.preview = true;
+      carving.payload.steps[0]!.blocks = [
+        { id: 'pour', type: 'video', provider: 'library', videoId, title: 'Pouring the bronze', channel: 'Benin Press', durationS: 4, chapters: [{ atS: 0, title: 'Heat' }, { atS: 2, title: 'Pour' }], pauses: [{ atS: 2, blockId: 'check' }] },
+        { id: 'check', type: 'choice', prompt: 'When do you pour?', options: [{ id: 'hot', text: 'When it glows', correct: true }, { id: 'cold', text: 'When it cools', correct: false }], explanation: 'Bronze must be molten.' },
+        { id: 'worksheet', type: 'download', title: 'Casting worksheet', path: `courses/${orgId}/${videoId}/worksheet.pdf`, fileName: 'worksheet.pdf', size: 1200, contentType: 'application/pdf' },
+      ] as never;
+      // A second video still uploading blocks review.
+      const pending = (await request(catalog, 'POST', videos, { ...L(author), body: { title: 'Not yet', fileName: 'b.mp4', contentType: 'video/mp4', size: 10 } })).body as { video: LibraryVideo };
+      const withPending = structuredClone(doc);
+      (withPending.modules[0]!.items[0]!.payload.steps[0]!.blocks as unknown[]).push({ id: 'later', type: 'video', provider: 'library', videoId: pending.video.id, title: 'Later', channel: 'Benin Press' });
+      const blocked = await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: draft.revision, doc: withPending } });
+      expect((blocked.body as Draft).issues).toEqual([{ path: 'modules.0.items.0.payload.steps.0.blocks.3.videoId', message: 'This video is still being processed: it can be published once it is ready' }]);
+      expect((await request(catalog, 'POST', url(draft.id, '/submit'), { ...L(author), body: {} })).body).toMatchObject({ code: 'draft_has_issues' });
+      expect((await request(catalog, 'DELETE', `${videos}/${pending.video.id}`, L(author))).status).toBe(409);
+
+      const saved = (await request(catalog, 'PUT', url(draft.id), { ...L(author), body: { revision: (blocked.body as Draft).revision, doc } })).body as Draft;
+      expect(saved.issues).toEqual([]);
+      expect((await request(catalog, 'DELETE', `${videos}/${pending.video.id}`, L(author))).status).toBe(204);
+      expect(((await request(catalog, 'GET', `${videos}/${videoId}`, L(author))).body as LibraryVideo).usedIn).toEqual([{ title: 'Benin Bronze Casting', slug }]);
+
+      await request(catalog, 'POST', url(draft.id, '/submit'), { ...L(author), body: {} });
+      expect((await request(catalog, 'POST', url(draft.id, '/publish'), { ...L(admin), body: { note: null } })).body).toMatchObject({ status: 'published', publishedVersionNo: 3 });
+
+      // Visitors open the free preview from the course page; answers never leave the server.
+      const page = (await request(catalog, 'GET', `/v1/catalog/courses/${slug}`)).body as { modules: { items: { key: string; preview: boolean }[] }[] };
+      expect(page.modules[0]!.items.filter((i) => i.preview).map((i) => i.key)).toEqual(['carving']);
+      const preview = await request(catalog, 'GET', `/v1/catalog/courses/${slug}/preview/carving`);
+      expect(preview.status).toBe(200);
+      expect(preview.body).toMatchObject({ course: { slug }, item: { key: 'carving', type: 'lesson' }, content: { type: 'lesson', steps: [{ blocks: [{ type: 'video', provider: 'library', videoId, pauses: [{ atS: 2, blockId: 'check' }] }, { type: 'choice' }, { type: 'download' }] }] } });
+      expect(JSON.stringify(preview.body)).not.toContain('correct');
+      expect((await request(catalog, 'GET', `/v1/catalog/courses/${slug}/preview/safety`)).status).toBe(404);
+
+      // A published course still uses it, so it can't be deleted.
+      expect((await request(catalog, 'DELETE', `${videos}/${videoId}`, L(author))).body).toMatchObject({ code: 'video_in_use' });
+    });
+
+    it('takes review comments on blocks, with replies and resolving, and shows who else has the draft open', async () => {
+      const draft = (await request(catalog, 'POST', '/v1/catalog/authoring/drafts', { ...L(author), body: { courseSlug: slug } })).body as Draft;
+      const anchor = { moduleKey: 'wax', itemKey: 'carving', blockId: 'intro', label: 'Module 1 › Lesson “Carving the wax” › Text' };
+      expect((await request(catalog, 'POST', url(draft.id, '/comments'), { ...L(outsider), body: { anchor, body: 'Hi' } })).status).toBe(404);
+      const first = await request(catalog, 'POST', url(draft.id, '/comments'), { ...L(owner), body: { anchor, body: 'Say how hot the wax gets.' } });
+      expect(first.status).toBe(201);
+      const comment = first.body as DraftComment;
+      expect(comment).toMatchObject({ parentId: null, anchor, author: { name: 'Osa Owner' }, mine: true, resolvedAt: null });
+      const reply = (await request(catalog, 'POST', url(draft.id, '/comments'), { ...L(author), body: { anchor: { label: 'ignored' }, body: 'Added: about 60 °C.', parentId: comment.id } })).body as DraftComment;
+      expect(reply).toMatchObject({ parentId: comment.id, anchor, mine: true });
+      // Replying to a reply joins the same thread.
+      const nested = (await request(catalog, 'POST', url(draft.id, '/comments'), { ...L(owner), body: { anchor, body: 'Thanks.', parentId: reply.id } })).body as DraftComment;
+      expect(nested.parentId).toBe(comment.id);
+
+      expect((await request(catalog, 'PATCH', url(draft.id, `/comments/${comment.id}`), { ...L(author), body: { body: 'Changed' } })).status).toBe(403);
+      expect((await request(catalog, 'PATCH', url(draft.id, `/comments/${reply.id}`), { ...L(author), body: { resolved: true } })).status).toBe(400);
+      expect((await request(catalog, 'PATCH', url(draft.id, `/comments/${comment.id}`), { ...L(author), body: { resolved: true } })).body).toMatchObject({ resolvedBy: { name: 'Ada Author' } });
+      expect((await request(catalog, 'PATCH', url(draft.id, `/comments/${reply.id}`), { ...L(author), body: { body: 'Added: about 60 degrees.' } })).body).toMatchObject({ body: 'Added: about 60 degrees.', editedAt: expect.any(String) });
+      const list = (await request(catalog, 'GET', url(draft.id, '/comments'), L(author))).body as { items: DraftComment[] };
+      expect(list.items.map((c) => c.body)).toEqual(['Say how hot the wax gets.', 'Added: about 60 degrees.', 'Thanks.']);
+      await notificationsFor(author, (n) => n.title.includes('commented on') || n.title.includes('replied on'));
+
+      // Presence: each sees the other, and whether they are editing.
+      expect((await request(catalog, 'POST', url(draft.id, '/presence'), { ...L(author), body: { where: null } })).body).toEqual({ people: [] });
+      const seen = (await request(catalog, 'POST', url(draft.id, '/presence'), { ...L(owner), body: { where: { moduleKey: 'wax', itemKey: 'carving', label: 'Carving the wax' }, editing: true } })).body as { people: Presence[] };
+      expect(seen.people).toEqual([expect.objectContaining({ name: 'Ada Author', editing: false, where: null })]);
+      const back = (await request(catalog, 'POST', url(draft.id, '/presence'), { ...L(author), body: { where: null } })).body as { people: Presence[] };
+      expect(back.people).toEqual([expect.objectContaining({ name: 'Osa Owner', editing: true, where: { moduleKey: 'wax', itemKey: 'carving', label: 'Carving the wax' } })]);
+
+      expect((await request(catalog, 'DELETE', url(draft.id, `/comments/${comment.id}`), L(author))).status).toBe(403);
+      expect((await request(catalog, 'DELETE', url(draft.id, `/comments/${comment.id}`), L(owner))).status).toBe(204);
+      expect(((await request(catalog, 'GET', url(draft.id, '/comments'), L(author))).body as { items: unknown[] }).items).toEqual([]);
+      expect((await request(catalog, 'DELETE', url(draft.id), L(author))).status).toBe(204);
+    });
   });
 });
 

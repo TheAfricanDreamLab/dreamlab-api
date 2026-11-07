@@ -20,6 +20,8 @@ export const contentItems = pgTable(
     title: text('title').notNull(),
     estimatedMinutes: integer('estimated_minutes').notNull(),
     isRequired: boolean('is_required').notNull().default(true),
+    /** Free preview (CAT-6): anyone who can see the course may open it before enrolling. */
+    isPreview: boolean('is_preview').notNull().default(false),
     gradeWeight: numeric('grade_weight', { mode: 'number' }).notNull().default(0),
     mediaAssetId: uuid('media_asset_id'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),

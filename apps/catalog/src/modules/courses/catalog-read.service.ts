@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { BlockAuthoring, CourseDetail, CourseSummary, ItemAuthoring } from '@dreamlab/contracts';
+import { type BlockAuthoring, type CourseDetail, type CourseSummary, type ItemAuthoring, type PreviewItem, toDeliveryContent } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { notFound } from '@lib/common';
 import { InjectDatabase } from '@lib/database';
@@ -88,6 +88,28 @@ export class CatalogReadService {
     return rows.length ? rows.map(({ p, role }) => ({ name: p.name, title: p.title, bio: p.bio, photoUrl: p.photoUrl, role })) : null;
   }
 
+  /**
+   * A free-preview item (CAT-6) of the course's published version, as learners receive it (answers
+   * removed), for anyone who may see the course. Other items: not found.
+   */
+  async previewItem(slug: string, itemKey: string, principal: Principal | null): Promise<PreviewItem> {
+    const [row] = await this.db.sys.select().from(courses).where(eq(courses.slug, slug));
+    if (!row || !this.canSee(row, principal)) throw notFound('course_not_found', 'Course not found');
+    const content = await this.content({ slug });
+    for (const m of content?.modules ?? []) {
+      const item = m.items.find((i) => i.key === itemKey);
+      if (!item) continue;
+      if (!item.authoring.preview) break;
+      return {
+        course: { slug: row.slug, title: row.title },
+        module: { key: m.key, title: m.title, position: m.position },
+        item: { key: item.key, type: item.type, title: item.title, minutes: item.minutes },
+        content: hideMatches(toDeliveryContent(item.authoring, `preview:${row.id}`)),
+      };
+    }
+    throw notFound('preview_not_found', 'This part of the course is not open for preview.');
+  }
+
   /** Course content for the learning service, answers included. */
   async content(by: { slug: string } | { versionId: string }): Promise<CourseContent | null> {
     let course: CourseRow | undefined;
@@ -119,7 +141,7 @@ export class CatalogReadService {
       : [];
 
     const refOf = (i: (typeof items)[number]): ContentItemRef => {
-      const base = { key: i.key, title: i.title, minutes: i.estimatedMinutes, required: i.isRequired };
+      const base = { key: i.key, title: i.title, minutes: i.estimatedMinutes, required: i.isRequired, preview: i.isPreview };
       let authoring: ItemAuthoring;
       const p = i.payload as Record<string, unknown>;
       if (i.itemType === 'quiz') {
@@ -189,6 +211,7 @@ export class CatalogReadService {
         title: contentItems.title,
         minutes: contentItems.estimatedMinutes,
         required: contentItems.isRequired,
+        preview: contentItems.isPreview,
       })
       .from(contentItems)
       .where(eq(contentItems.courseVersionId, versionId))
@@ -263,4 +286,16 @@ export class CatalogReadService {
       };
     });
   }
+}
+
+/**
+ * A preview's answers are never checked, so "match" blocks get fresh ids on their right-hand side:
+ * the shared pair ids would otherwise show which sides go together.
+ */
+function hideMatches(content: PreviewItem['content']): PreviewItem['content'] {
+  const blind = <B extends { type: string }>(b: B): B =>
+    b.type === 'match' ? ({ ...b, right: (b as unknown as { right: { id: string; text: string }[] }).right.map((r, i) => ({ id: `r${i + 1}`, text: r.text })) } as B) : b;
+  if (content.type === 'lesson') return { ...content, steps: content.steps.map((s) => ({ ...s, blocks: s.blocks.map(blind) })) };
+  if (content.type === 'quiz') return { ...content, questions: content.questions.map(blind) };
+  return content;
 }

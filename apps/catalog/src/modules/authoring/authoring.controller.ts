@@ -1,11 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { apiV1Contract } from '@dreamlab/contracts';
 import { Authenticated, CurrentPrincipal, Principal } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { AuthoringService } from './authoring.service';
+import { CollabService } from './collab.service';
 import {
+  AddCommentDto,
   AuthoringOverviewDto,
+  CommentDto,
+  CommentListDto,
+  CommentParamsDto,
+  HeartbeatDto,
+  PresenceListDto,
+  UpdateCommentDto,
   CourseMediaUploadDto,
   CourseMediaUploadRequestDto,
   CreateDraftDto,
@@ -27,7 +35,10 @@ const r = apiV1Contract.authoring;
 @ApiTags('authoring')
 @Controller('v1/catalog/authoring')
 export class AuthoringController {
-  constructor(private readonly authoring: AuthoringService) {}
+  constructor(
+    private readonly authoring: AuthoringService,
+    private readonly collab: CollabService,
+  ) {}
 
   @Get()
   @Authenticated()
@@ -128,6 +139,47 @@ export class AuthoringController {
   @ZodResponse({ status: 201, type: CourseMediaUploadDto })
   uploadMedia(@Param() p: DraftParamsDto, @Body() dto: CourseMediaUploadRequestDto, @CurrentPrincipal() principal: Principal) {
     return this.authoring.uploadMedia(principal, p.draftId, dto);
+  }
+
+  @Get('drafts/:draftId/comments')
+  @Authenticated()
+  @ApiOperation({ summary: r.comments.summary })
+  @ZodResponse({ status: 200, type: CommentListDto })
+  comments(@Param() p: DraftParamsDto, @CurrentPrincipal() principal: Principal) {
+    return this.collab.comments(principal, p.draftId);
+  }
+
+  @Post('drafts/:draftId/comments')
+  @Authenticated()
+  @ApiOperation({ summary: r.addComment.summary })
+  @ZodResponse({ status: 201, type: CommentDto })
+  addComment(@Param() p: DraftParamsDto, @Body() dto: AddCommentDto, @CurrentPrincipal() principal: Principal) {
+    return this.collab.add(principal, p.draftId, dto);
+  }
+
+  @Patch('drafts/:draftId/comments/:commentId')
+  @Authenticated()
+  @ApiOperation({ summary: r.updateComment.summary })
+  @ZodResponse({ status: 200, type: CommentDto })
+  updateComment(@Param() p: CommentParamsDto, @Body() dto: UpdateCommentDto, @CurrentPrincipal() principal: Principal) {
+    return this.collab.update(principal, p.draftId, p.commentId, dto);
+  }
+
+  @Delete('drafts/:draftId/comments/:commentId')
+  @Authenticated()
+  @HttpCode(204)
+  @ApiOperation({ summary: r.removeComment.summary })
+  async removeComment(@Param() p: CommentParamsDto, @CurrentPrincipal() principal: Principal) {
+    await this.collab.remove(principal, p.draftId, p.commentId);
+  }
+
+  @Post('drafts/:draftId/presence')
+  @Authenticated()
+  @HttpCode(200)
+  @ApiOperation({ summary: r.presence.summary })
+  @ZodResponse({ status: 200, type: PresenceListDto })
+  presence(@Param() p: DraftParamsDto, @Body() dto: HeartbeatDto, @CurrentPrincipal() principal: Principal) {
+    return this.collab.heartbeat(principal, p.draftId, dto);
   }
 
   @Delete('drafts/:draftId')

@@ -4,7 +4,7 @@ import { apiV1Contract } from '@dreamlab/contracts';
 import { OptionalPrincipal, Principal, Public } from '@lib/auth';
 import { ZodResponse } from 'nestjs-zod';
 import { CatalogReadService } from './catalog-read.service';
-import { CourseDetailDto, CourseListDto, CourseListQueryDto, SlugParamsDto } from './dto/catalog.dto';
+import { CourseDetailDto, CourseListDto, CourseListQueryDto, PreviewItemDto, PreviewParamsDto, SlugParamsDto } from './dto/catalog.dto';
 
 const r = apiV1Contract.catalog;
 
@@ -26,5 +26,12 @@ export class CoursesController {
   @ZodResponse({ status: 200, type: CourseDetailDto })
   get(@Param() p: SlugParamsDto, @OptionalPrincipal() principal: Principal | null) {
     return this.catalog.getCourse(p.slug, principal);
+  }
+
+  @Get(':slug/preview/:itemKey')
+  @ApiOperation({ summary: r.previewItem.summary })
+  @ZodResponse({ status: 200, type: PreviewItemDto })
+  preview(@Param() p: PreviewParamsDto, @OptionalPrincipal() principal: Principal | null) {
+    return this.catalog.previewItem(p.slug, p.itemKey, principal);
   }
 }

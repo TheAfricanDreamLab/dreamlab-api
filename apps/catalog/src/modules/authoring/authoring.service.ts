@@ -8,6 +8,7 @@ import {
   DRAFT_HISTORY_KEPT,
   draftIssues,
   type DraftSave,
+  type DraftIssue,
   type DraftSummary,
   type CourseMediaUpload,
   type Permission,
@@ -55,6 +56,21 @@ export class AuthoringService {
     @Inject(STORAGE) private readonly storage: BlobStorage,
     @Optional() @Inject(AUTHZ_CHECKER) private readonly authz?: AuthzChecker,
   ) {}
+
+  /**
+   * Checks beyond the document itself (CAT-6: library videos must be processed), registered by the
+   * modules that own the data, so this service needn't depend on them.
+   */
+  private readonly documentChecks: ((doc: unknown, ownerOrgId: string) => Promise<DraftIssue[]>)[] = [];
+  addDocumentCheck(check: (doc: unknown, ownerOrgId: string) => Promise<DraftIssue[]>): void {
+    this.documentChecks.push(check);
+  }
+  /** Everything that stops a document being published. */
+  async issuesOf(doc: unknown, ownerOrgId: string): Promise<DraftIssue[]> {
+    const own = draftIssues(doc);
+    const more = (await Promise.all(this.documentChecks.map((c) => c(doc, ownerOrgId)))).flat();
+    return [...own, ...more];
+  }
 
   async overview(p: Principal): Promise<AuthoringOverview> {
     const orgId = await this.homeOrg(p);
@@ -255,7 +271,7 @@ export class AuthoringService {
     const draft = await this.visible(p, draftId);
     if (!(await this.canEdit(p, draft))) throw forbidden('permission_denied', 'Only the course’s authors can send it for review.');
     if (draft.status !== 'draft' && draft.status !== 'changes_requested') throw conflict('draft_not_editable', 'This draft is not open for editing.');
-    if (draftIssues(draft.doc).length > 0) throw conflict('draft_has_issues', 'Fix the issues listed before sending it for review.');
+    if ((await this.issuesOf(draft.doc, draft.ownerOrgId)).length > 0) throw conflict('draft_has_issues', 'Fix the issues listed before sending it for review.');
     // The revision that was checked is the one that goes for review.
     const reviewers = draft.visibility === 'public' ? await this.platformOrg() : draft.ownerOrgId;
     return this.transition(p, draft, { status: 'in_review', submittedByUserId: p.userId, submittedAt: new Date() }, ['draft', 'changes_requested'], draft.revision, (row) => ({
@@ -297,6 +313,8 @@ export class AuthoringService {
   async publish(p: Principal, draftId: string, note: string | null): Promise<Draft> {
     const draft = await this.visible(p, draftId);
     if (!(await this.canReview(p, draft))) throw forbidden('permission_denied', this.reviewerMessage(draft));
+    // Checks that read other tables (videos still processing) run before the publish transaction.
+    if ((await this.issuesOf(draft.doc, draft.ownerOrgId)).length > 0) throw conflict('draft_has_issues', 'This draft has issues to fix before it can be published.');
     const row = await this.db.system(async (tx) => {
       // Locked for the whole publish, so the same draft can't be published twice at once.
       const [locked] = await tx.select().from(courseDrafts).where(eq(courseDrafts.id, draft.id)).for('update');
@@ -355,7 +373,7 @@ export class AuthoringService {
   }
 
   /** An upload link for a cover image or video in the course's public media (MEDIA-1). */
-  async uploadMedia(p: Principal, draftId: string, req: { kind: 'image' | 'video'; fileName: string; contentType: string; size: number }): Promise<CourseMediaUpload> {
+  async uploadMedia(p: Principal, draftId: string, req: { kind: 'image' | 'video' | 'file'; fileName: string; contentType: string; size: number }): Promise<CourseMediaUpload> {
     const draft = await this.visible(p, draftId);
     if (!(await this.canEdit(p, draft))) throw forbidden('permission_denied', 'Only the course’s authors can add media to it.');
     const path = `courses/${draft.ownerOrgId}/${newId()}/${safeFileName(req.fileName)}`;
@@ -401,6 +419,34 @@ export class AuthoringService {
   /** May the caller author content for the organisation as a whole (course.content.edit org-wide)? */
   async isOrgAuthor(p: Principal, orgId: string): Promise<boolean> {
     return this.may(p, orgId, 'course.content.edit');
+  }
+
+  /** May the caller publish the organisation's courses (course.publish)? */
+  async isOrgReviewer(p: Principal, orgId: string): Promise<boolean> {
+    return this.may(p, orgId, 'course.publish');
+  }
+
+  /** Does the caller author at least one of the organisation's courses (the author role scoped to it)? */
+  async authorsSomeCourse(p: Principal, orgId: string): Promise<boolean> {
+    if (!this.authz) return false;
+    const owned = await this.db.sys.select({ id: courses.id }).from(courses).where(eq(courses.ownerOrgId, orgId)).limit(200);
+    for (const c of owned) if (await this.mayCourse(p, orgId, c.id)) return true;
+    return false;
+  }
+
+  /** Who may open the draft: its authors, its reviewers, and for public courses the platform team. */
+  async visibleDraft(p: Principal, draftId: string): Promise<{ draft: DraftRow; canEdit: boolean }> {
+    const draft = await this.visible(p, draftId);
+    return { draft, canEdit: await this.canEdit(p, draft) };
+  }
+
+  /** Everyone who wrote, sent or reviewed the draft, for notifications. */
+  peopleOf(d: DraftRow): string[] {
+    return [...new Set([...authorsOf(d), ...(d.reviewedByUserId ? [d.reviewedByUserId] : [])])];
+  }
+
+  async namesOf(ids: (string | null)[]): Promise<Map<string, string>> {
+    return this.userNames(ids);
   }
 
   /** May the caller change this course: an organisation author, or an author of this course. */
@@ -530,7 +576,7 @@ export class AuthoringService {
       ...summary!,
       revision: d.revision,
       doc: d.doc,
-      issues: draftIssues(d.doc),
+      issues: await this.issuesOf(d.doc, d.ownerOrgId),
       reviewNote: d.reviewNote,
       reviewedBy: d.reviewedByUserId ? { userId: d.reviewedByUserId, name: names.get(d.reviewedByUserId) ?? 'Reviewer' } : null,
       reviewedAt: d.reviewedAt?.toISOString() ?? null,

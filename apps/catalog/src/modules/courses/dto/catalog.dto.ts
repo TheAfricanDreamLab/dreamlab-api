@@ -6,6 +6,7 @@ import {
   CourseSlugSchema,
   CourseSummarySchema,
   ImportResultSchema,
+  PreviewItemSchema,
   ProgramAuthoringSchema,
   ProgramDetailSchema,
   ProgramSummarySchema,
@@ -32,3 +33,5 @@ export class ImportCourseDto extends createZodDto(CourseAuthoringSchema) {}
 export class ImportProgramDto extends createZodDto(ProgramAuthoringSchema) {}
 export class ImportResultDto extends createZodDto(ImportResultSchema) {}
 export class ProgramImportResultDto extends createZodDto(z.object({ slug: z.string() })) {}
+export class PreviewItemDto extends createZodDto(PreviewItemSchema) {}
+export class PreviewParamsDto extends createZodDto(z.object({ slug: CourseSlugSchema, itemKey: z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/) })) {}

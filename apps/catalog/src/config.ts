@@ -26,6 +26,24 @@ export const catalogConfigSchema = baseConfigSchema.extend({
   IAM_JWKS_URL: z.string().url(),
   /** Course images and videos uploaded in the browser (MEDIA-1). */
   ...storageConfigShape,
+
+  /**
+   * What this process does (CAT-6): `api` serves requests; `video-worker` only processes videos and
+   * makes captions (its own container, so a long conversion never slows the API); `all` does both
+   * (development). Unset: `all` in development, `api` otherwise.
+   */
+  CATALOG_ROLE: z.enum(['api', 'video-worker', 'all']).optional(),
+  /** Scratch space for one job at a time; needs room for the original plus its conversions. */
+  VIDEO_WORK_DIR: z.string().optional(),
+  FFMPEG_PATH: z.string().default('ffmpeg'),
+  FFPROBE_PATH: z.string().default('ffprobe'),
+  /** whisper.cpp's command-line program and model, for automatic captions. */
+  WHISPER_PATH: z.string().default('whisper-cli'),
+  WHISPER_MODEL: z.string().default('/opt/whisper/ggml-base.bin'),
+  /** CPU threads a conversion or transcription may use. */
+  VIDEO_THREADS: z.coerce.number().int().min(1).max(16).default(2),
+  /** How often an idle worker looks for work, in milliseconds. */
+  VIDEO_POLL_MS: z.coerce.number().int().min(200).default(5000),
 });
 
 export type CatalogConfig = z.infer<typeof catalogConfigSchema>;

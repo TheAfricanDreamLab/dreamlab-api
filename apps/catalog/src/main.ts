@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { CONTRACTS_VERSION } from '@dreamlab/contracts';
 import { createHttpApp, installGatewayTrust, setupSwagger } from '@lib/common';
@@ -13,10 +15,23 @@ import { catalogMigrationsFolder } from './database';
 import { CatalogSeedService } from './modules/seed/catalog-seed.service';
 import { DATASETS } from './modules/seed/datasets';
 import { STORAGE } from './modules/authoring/authoring.service';
+import { VideoWorker } from './modules/videos/video-worker';
+import { VideoWorkerModule } from './modules/videos/video-worker.module';
 
 async function bootstrap(): Promise<void> {
   loadDotEnv();
   const config = loadConfig(catalogProductionSchema);
+  const role = config.CATALOG_ROLE ?? (config.NODE_ENV === 'development' ? 'all' : 'api');
+
+  // The video worker runs in its own container (CAT-6): no HTTP, no migrations (the API runs those).
+  if (role === 'video-worker') {
+    const worker = await NestFactory.createApplicationContext(VideoWorkerModule.forRoot(config), { bufferLogs: true });
+    // The app logger, which also flushes what was buffered while starting.
+    worker.useLogger(worker.get(PinoLogger));
+    worker.enableShutdownHooks();
+    worker.get(VideoWorker).start();
+    return;
+  }
 
   if (config.CATALOG_MIGRATE_ON_BOOT) {
     if (!config.CATALOG_MIGRATION_DATABASE_URL) throw new Error('CATALOG_MIGRATE_ON_BOOT needs CATALOG_MIGRATION_DATABASE_URL');
@@ -44,6 +59,7 @@ async function bootstrap(): Promise<void> {
     });
   }
   await app.listen({ port: config.CATALOG_PORT, host: '0.0.0.0' });
+  if (role === 'all') app.get(VideoWorker).start();
 
   // Development: Azurite needs its containers, and CORS so the browser can upload.
   if (config.NODE_ENV === 'development') {

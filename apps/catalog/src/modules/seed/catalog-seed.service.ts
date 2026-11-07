@@ -167,6 +167,7 @@ export class CatalogSeedService {
           title: item.title,
           estimatedMinutes: item.minutes,
           isRequired: item.required,
+          isPreview: item.preview === true,
           gradeWeight: 'gradeWeight' in item ? item.gradeWeight : 0,
         };
         if (item.type === 'quiz') {
