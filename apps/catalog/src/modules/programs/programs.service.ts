@@ -77,7 +77,7 @@ export class ProgramsService {
       }),
       capstoneStages: stages.map((s) => ({ position: s.position, name: s.name, outputDocument: s.outputDocument, creditHours: s.creditHours, summary: s.summary })),
       graduationRequirements: reqs.map((r) => ({ position: r.position, key: r.key, label: r.label })),
-      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput })),
+      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput, kind: w.kind })),
     };
   }
 

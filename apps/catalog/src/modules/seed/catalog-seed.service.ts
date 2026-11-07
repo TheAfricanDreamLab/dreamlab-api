@@ -5,6 +5,7 @@ import { InjectDatabase } from '@lib/database';
 import { InjectOutbox, OutboxWriter, SYSTEM_ACTOR } from '@lib/messaging';
 import { IamRpc, RpcClient } from '@lib/rpc';
 import { and, eq, max, ne } from 'drizzle-orm';
+import type { z } from 'zod';
 import { CatalogDatabase, CatalogTx, schema } from '../../database';
 import { CatalogEvents } from '../../events';
 
@@ -13,7 +14,8 @@ export const IAM_RPC = Symbol('IAM_RPC');
 export interface CatalogDataset {
   name: string;
   courses: CourseAuthoring[];
-  programs: ProgramAuthoring[];
+  /** As written: defaults (a calendar week's kind) are filled in on import. */
+  programs: z.input<typeof ProgramAuthoringSchema>[];
   /** Courses featured when first listed. */
   featured: string[];
 }
@@ -253,7 +255,7 @@ export class CatalogSeedService {
         await tx.insert(graduationRequirements).values({ id: newId(), programId, ownerOrgId, position: i + 1, key: r.key, label: r.label });
       }
       for (const w of p.calendar) {
-        await tx.insert(programCalendarWeeks).values({ id: newId(), programId, ownerOrgId, phaseId: phaseIds.get(w.phase) ?? null, weekNo: w.weekNo, focus: w.focus, majorOutput: w.majorOutput });
+        await tx.insert(programCalendarWeeks).values({ id: newId(), programId, ownerOrgId, phaseId: phaseIds.get(w.phase) ?? null, weekNo: w.weekNo, focus: w.focus, majorOutput: w.majorOutput, kind: w.kind });
       }
       const listed = await tx
         .select({ id: catalogListings.id })

@@ -17,6 +17,8 @@ export const programCalendarWeeks = pgTable(
     weekNo: integer('week_no').notNull(),
     focus: text('focus').notNull(),
     majorOutput: text('major_output').notNull(),
+    /** A catch-up week has no new lessons: time to get level (LRN-9). */
+    kind: text('kind', { enum: ['learning', 'catch_up'] }).notNull().default('learning'),
     ...timestamps,
   },
   (t) => [uniqueIndex('program_calendar_weeks_program_week').on(t.programId, t.weekNo)],

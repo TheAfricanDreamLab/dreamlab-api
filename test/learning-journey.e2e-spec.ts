@@ -25,6 +25,9 @@ import {
   LibraryVideo,
   Presence,
   VideoUploadLink,
+  VideoManifestSchema,
+  ProgramAuthoring,
+  ProgramDetail,
   videoBlockId,
   CourseAuthoringSchema,
   CourseProgress,
@@ -60,6 +63,7 @@ import { catalogMigrationsFolder } from '../apps/catalog/src/database';
 import { CatalogSeedService } from '../apps/catalog/src/modules/seed/catalog-seed.service';
 import { STORAGE as CATALOG_STORAGE } from '../apps/catalog/src/modules/authoring/authoring.service';
 import { VideoWorker } from '../apps/catalog/src/modules/videos/video-worker';
+import { CatalogRpcController } from '../apps/catalog/src/modules/courses/catalog-rpc.controller';
 import { DATASETS } from '../apps/catalog/src/modules/seed/datasets';
 import { IamAppModule } from '../apps/iam/src/app.module';
 import { iamConfigSchema } from '../apps/iam/src/config';
@@ -351,6 +355,22 @@ describe('catalog', () => {
     const strip = (d: Record<string, unknown>) => JSON.parse(JSON.stringify(d, (k, v) => (k === 'id' ? undefined : v)));
     expect(strip(after)).toEqual(strip(before));
     expect((await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(await signUp('nosy@example.com', 'Nosy Learner')))).status).toBe(403);
+
+    // LRN-9: weeks are learning weeks unless marked as catch-up weeks; the kind is kept and shown.
+    const authored = exported.body as ProgramAuthoring;
+    expect(authored.calendar.every((w) => w.kind === 'learning')).toBe(true);
+    const calendar = authored.calendar.map((w) => (w.weekNo === 8 ? { ...w, kind: 'catch_up' } : w));
+    expect((await request(catalog, 'POST', '/v1/catalog/admin/programs/import', { ...L(admin), body: { ...authored, calendar } })).status).toBe(200);
+    const marked = (await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as ProgramDetail;
+    expect(marked.calendar.filter((w) => w.kind === 'catch_up').map((w) => w.weekNo)).toEqual([8]);
+    expect((await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(admin))).body).toMatchObject({ calendar: expect.arrayContaining([expect.objectContaining({ weekNo: 8, kind: 'catch_up' })]) });
+    // Learning gets the calendar, kind included, over RPC when it schedules a cohort.
+    const rpc = (await catalog.get(CatalogRpcController).program({ slug: 'the-african-dream-lab' })) as ProgramDetail;
+    expect(rpc.calendar.find((w) => w.weekNo === 8)).toMatchObject({ kind: 'catch_up' });
+    // Without the field (older programme files), every week is a learning week again.
+    const unmarked = authored.calendar.map(({ kind: _kind, ...w }) => w);
+    expect((await request(catalog, 'POST', '/v1/catalog/admin/programs/import', { ...L(admin), body: { ...authored, calendar: unmarked } })).status).toBe(200);
+    expect(strip((await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as Record<string, unknown>)).toEqual(strip(before));
   });
 
   it('re-seeding identical content publishes no new version', async () => {
@@ -1107,7 +1127,15 @@ describe('course authoring in the browser (CAT-3)', () => {
       const ready = (await request(catalog, 'GET', `${videos}/${videoId}`, L(author))).body as LibraryVideo;
       expect(ready).toMatchObject({ status: 'ready', durationS: 4, width: 1280, height: 720, renditions: [360, 720], manifestUrl: `/media/videos/${videoId}/manifest.json`, posterUrl: `/media/videos/${videoId}/v1/poster.jpg` });
       const storage = catalog.get<BlobStorage>(CATALOG_STORAGE);
-      for (const file of ['manifest.json', 'v1/master.m3u8', 'v1/360p/index.m3u8', 'v1/720p/index.m3u8', 'v1/poster.jpg', 'v1/thumb.jpg']) expect(await storage.stat('public', `videos/${videoId}/${file}`)).not.toBeNull();
+      for (const file of ['manifest.json', 'v1/master.m3u8', 'v1/360p/index.m3u8', 'v1/720p/index.m3u8', 'v1/poster.jpg', 'v1/thumb.jpg', 'v1/audio.m4a']) expect(await storage.stat('public', `videos/${videoId}/${file}`)).not.toBeNull();
+      // LRN-9: what each stream weighs, and the audio-only version.
+      const manifestFile = join(tmpdir(), `manifest-${videoId}.json`);
+      await storage.downloadToFile('public', `videos/${videoId}/manifest.json`, manifestFile);
+      const manifest = VideoManifestSchema.parse(JSON.parse(readFileSync(manifestFile, 'utf8')));
+      expect(manifest.renditions?.map((r) => r.height)).toEqual([360, 720]);
+      expect(manifest.renditions![0]!.bytes).toBeGreaterThan(0);
+      expect(manifest.renditions![1]!.bytes).toBeGreaterThan(manifest.renditions![0]!.bytes);
+      expect(manifest.audio).toEqual({ src: 'v1/audio.m4a', bytes: (await storage.stat('public', `videos/${videoId}/v1/audio.m4a`))!.size });
       // The original stays private.
       expect(await storage.stat('public', `videos/${videoId}/source`)).toBeNull();
       expect(((await request(catalog, 'GET', `${videos}?q=bronze`, L(author))).body as { items: LibraryVideo[] }).items.map((v) => v.id)).toEqual([videoId]);

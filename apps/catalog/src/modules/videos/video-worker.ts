@@ -11,7 +11,7 @@ import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { CatalogConfig } from '../../config';
 import { CatalogDatabase, schema } from '../../database';
 import { STORAGE } from '../authoring/authoring.service';
-import { IMMUTABLE, sourcePath, versionFolder, writeCaptions, writeManifest } from './video-files';
+import { AUDIO_FILE, IMMUTABLE, sourcePath, versionFolder, writeCaptions, writeManifest, type StreamSizes } from './video-files';
 
 const { videos, videoCaptions, videoJobs } = schema;
 type JobRow = typeof videoJobs.$inferSelect;
@@ -40,13 +40,32 @@ export function renditionsFor(height: number): number[] {
   return out;
 }
 const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
+
+/**
+ * The audio-only version (LRN-9): mono AAC at 64 kbps, about 0.5 MB a minute, with the index at the
+ * front so it starts playing before it has all downloaded.
+ */
+export function audioArgs(src: string, file: string): string[] {
+  return ['-hide_banner', '-nostdin', '-y', '-i', src, '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-ar', '44100', '-movflags', '+faststart', file];
+}
+
+/** Total bytes of the files in a folder (one rendition's playlist and segments). */
+export async function folderBytes(dir: string): Promise<number> {
+  let total = 0;
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) total += await folderBytes(join(dir, e.name));
+    else total += (await stat(join(dir, e.name))).size;
+  }
+  return total;
+}
+
 const BITRATE: Record<'low' | 'high', { video: number; max: number }> = { low: { video: 700, max: 900 }, high: { video: 2200, max: 2800 } };
 
 /**
  * The video worker (CAT-6). One job at a time, claimed from video_jobs with SKIP LOCKED so several
  * workers could share the queue. Processing makes HLS streams (H.264 + AAC, 6-second segments),
- * a poster and a thumbnail; captions come from whisper.cpp. Everything learners load is written
- * to a new version folder, then the manifest is switched over to it.
+ * an audio-only version, a poster and a thumbnail; captions come from whisper.cpp. Everything
+ * learners load is written to a new version folder, then the manifest is switched over to it.
  */
 @Injectable()
 export class VideoWorker implements OnApplicationShutdown {
@@ -232,6 +251,14 @@ export class VideoWorker implements OnApplicationShutdown {
     }
     await writeFile(join(out, 'master.m3u8'), `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n${variants.join('\n')}\n`);
 
+    // What each stream costs in data, and a version to listen to when even 360p is too much.
+    const sizes: StreamSizes = { renditions: [], audio: null };
+    for (const h of heights) sizes.renditions.push({ height: h, bytes: await folderBytes(join(out, `${h}p`)) });
+    if (probe.audio) {
+      await this.run(this.config.FFMPEG_PATH, audioArgs(src, join(out, AUDIO_FILE)), signal);
+      sizes.audio = { bytes: (await stat(join(out, AUDIO_FILE))).size };
+    }
+
     // A poster from early in the video (past any fade-in), and a small thumbnail.
     const at = Math.min(Math.max(probe.durationS * 0.1, 1), 8, Math.max(probe.durationS - 0.5, 0));
     const frame = (file: string, height: number) =>
@@ -244,11 +271,11 @@ export class VideoWorker implements OnApplicationShutdown {
     await this.uploadFolder(out, versionFolder(video.id, version));
     const [updated] = await this.db.sys
       .update(videos)
-      .set({ status: 'ready', progress: null, error: null, durationS: Math.max(1, Math.round(probe.durationS)), width: probe.width, height: probe.height, renditions: heights, version, updatedAt: new Date() })
+      .set({ status: 'ready', progress: null, error: null, durationS: Math.max(1, Math.round(probe.durationS)), width: probe.width, height: probe.height, renditions: heights, streamSizes: sizes, version, updatedAt: new Date() })
       .where(eq(videos.id, video.id))
       .returning();
     const tracks = await this.db.sys.select().from(videoCaptions).where(eq(videoCaptions.videoId, video.id)).orderBy(videoCaptions.lang);
-    await writeManifest(this.storage, { id: video.id, version, durationS: updated!.durationS!, width: probe.width, height: probe.height, captions: tracks });
+    await writeManifest(this.storage, { id: video.id, version, durationS: updated!.durationS!, width: probe.width, height: probe.height, captions: tracks, sizes });
     // The version before the last stays for players that loaded the old manifest; older ones go.
     if (version > 2) await this.storage.removeAll('public', versionFolder(video.id, version - 2)).catch(() => undefined);
   }
@@ -337,7 +364,7 @@ export class VideoWorker implements OnApplicationShutdown {
       .where(and(eq(videoJobs.videoId, video.id), eq(videoJobs.kind, 'captions'), inArray(videoJobs.status, ['failed']), ne(videoJobs.id, job.id)));
     const tracks = await this.db.sys.select().from(videoCaptions).where(eq(videoCaptions.videoId, video.id)).orderBy(videoCaptions.lang);
     if (video.status === 'ready' && video.durationS && video.width && video.height) {
-      await writeManifest(this.storage, { id: video.id, version: video.version, durationS: video.durationS, width: video.width, height: video.height, captions: tracks });
+      await writeManifest(this.storage, { id: video.id, version: video.version, durationS: video.durationS, width: video.width, height: video.height, captions: tracks, sizes: video.streamSizes });
     }
   }
 
@@ -364,7 +391,8 @@ export class VideoWorker implements OnApplicationShutdown {
       }
     };
     await walk(local);
-    const type = (f: string) => (f.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : f.endsWith('.ts') ? 'video/mp2t' : f.endsWith('.jpg') ? 'image/jpeg' : 'application/octet-stream');
+    const type = (f: string) =>
+      f.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : f.endsWith('.ts') ? 'video/mp2t' : f.endsWith('.jpg') ? 'image/jpeg' : f.endsWith('.m4a') ? 'audio/mp4' : 'application/octet-stream';
     // A few at a time: segments are small, and the VM's bandwidth is shared.
     for (let i = 0; i < files.length; i += 6) {
       await Promise.all(
