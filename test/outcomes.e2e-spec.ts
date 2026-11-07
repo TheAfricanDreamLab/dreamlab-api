@@ -36,6 +36,7 @@ import { CertificatesIntake } from '../apps/learning/src/modules/outcomes/certif
 
 class CapturingNotifier implements Notifier {
   otps: OtpMessage[] = [];
+  async sendAccountNotice() {}
   async sendOtp(m: OtpMessage) {
     this.otps.push(m);
   }

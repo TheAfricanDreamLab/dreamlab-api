@@ -4,7 +4,7 @@ import { AppException } from '@lib/common';
 import { CONFIG } from '@lib/config';
 import { type EmailSender, renderEmail } from '@lib/email';
 import type { IamConfig } from '../../config';
-import type { InvitationMessage, Notifier, OtpMessage } from './interfaces/notifier.interface';
+import type { AccountNotice, InvitationMessage, Notifier, OtpMessage } from './interfaces/notifier.interface';
 import type { SmsSender } from './providers/sms-sender.interface';
 
 export const NOTIFIER = Symbol('NOTIFIER');
@@ -89,6 +89,50 @@ export class ChannelNotifier implements Notifier {
     });
     const subject = m.inviterName ? `${m.inviterName} invited you to join ${m.orgName}` : `You’re invited to join ${m.orgName}`;
     await this.deliver({ to: m.destination, subject, ...body });
+  }
+
+  /** Suspended, banned or reinstated (PLT-2): what happened, until when, and the platform's message. */
+  async sendAccountNotice(m: AccountNotice): Promise<void> {
+    const said = m.message ? [`The platform team says: “${m.message}”`] : [];
+    const copy =
+      m.status === 'active'
+        ? {
+            subject: 'Your Dream Lab account is active again',
+            heading: 'Welcome back',
+            paragraphs: ['Your account on The African Dream Lab is active again. You can sign in and carry on where you left off.', ...said],
+            button: { label: 'Sign in', url: `${this.config.PUBLIC_APP_URL}/login` },
+            note: undefined,
+          }
+        : m.status === 'suspended'
+          ? {
+              subject: 'Your Dream Lab account is suspended',
+              heading: 'Your account is suspended',
+              paragraphs: [
+                m.until
+                  ? `A platform administrator has suspended your account on The African Dream Lab until ${longDate(m.until)}. You can sign in again after that.`
+                  : 'A platform administrator has suspended your account on The African Dream Lab. You can sign in again once they lift the suspension.',
+                ...said,
+              ],
+              button: undefined,
+              note: 'You’ve been signed out everywhere. Your work and progress are kept. If you think this is a mistake, reply to this email.',
+            }
+          : {
+              subject: 'Your Dream Lab account has been closed',
+              heading: 'Your account has been closed',
+              paragraphs: ['A platform administrator has closed your account on The African Dream Lab for breaking the platform’s rules. You can no longer sign in.', ...said],
+              button: undefined,
+              note: 'If you think this is a mistake, reply to this email.',
+            };
+    const body = renderEmail({
+      appUrl: this.config.PUBLIC_APP_URL,
+      preview: copy.heading,
+      heading: copy.heading,
+      paragraphs: [`Hello ${m.name},`, ...copy.paragraphs],
+      ...(copy.button ? { button: copy.button } : {}),
+      ...(copy.note ? { note: copy.note } : {}),
+      reason: 'You’re getting this because of a change to your account.',
+    });
+    await this.deliver({ to: m.destination, subject: copy.subject, ...body });
   }
 
   private async deliver(message: Parameters<EmailSender['send']>[0]): Promise<void> {

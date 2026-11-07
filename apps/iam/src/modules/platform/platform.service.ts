@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import type { PlatformOverview, PlatformUser, PlatformUserDetail } from '@dreamlab/contracts';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PlatformOverview, PlatformUser, PlatformUserDetail, SetUserStatus, UserStatus } from '@dreamlab/contracts';
 import type { Principal } from '@lib/auth';
 import { conflict, notFound } from '@lib/common';
 import { InjectConfig } from '@lib/config';
@@ -12,6 +12,8 @@ import { IamDatabase, schema } from '../../database';
 import { IamEvents } from '../../events';
 import { activeAssignment, AuthzService } from '../authz/authz.service';
 import { SessionsService } from '../auth/services/sessions.service';
+import { NOTIFIER } from '../notifications/notifier.service';
+import type { Notifier } from '../notifications/interfaces/notifier.interface';
 
 const { users, userIdentities, sessions, memberships, organizations, roleAssignments, roles, groupMembers } = schema;
 type UserRow = typeof users.$inferSelect;
@@ -25,14 +27,25 @@ export class PlatformService {
     @InjectConfig() private readonly config: IamConfig,
     private readonly sessions: SessionsService,
     private readonly authz: AuthzService,
+    @Inject(NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
+  /** Suspensions whose end has passed are lifted before anyone looks (sign-in lifts them too). */
+  private async liftEndedSuspensions(): Promise<void> {
+    await this.db.sys
+      .update(users)
+      .set({ status: 'active', suspendedUntil: null })
+      .where(and(eq(users.status, 'suspended'), lt(users.suspendedUntil, new Date())));
+  }
+
   async overview(): Promise<PlatformOverview> {
+    await this.liftEndedSuspensions();
     const [u] = await this.db.sys
       .select({
         total: sql<number>`count(*) filter (where ${users.status} <> 'deleted')::int`,
         new7d: sql<number>`count(*) filter (where ${users.createdAt} > now() - interval '7 days')::int`,
         suspended: sql<number>`count(*) filter (where ${users.status} = 'suspended')::int`,
+        banned: sql<number>`count(*) filter (where ${users.status} = 'banned')::int`,
         withMfa: sql<number>`count(*) filter (where ${users.mfaEnabledAt} is not null)::int`,
       })
       .from(users);
@@ -46,14 +59,15 @@ export class PlatformService {
       left join ${users} on ${users.createdAt}::date = d::date
       group by d order by d`);
     return {
-      users: { total: u?.total ?? 0, new7d: u?.new7d ?? 0, suspended: u?.suspended ?? 0, withMfa: u?.withMfa ?? 0 },
+      users: { total: u?.total ?? 0, new7d: u?.new7d ?? 0, suspended: u?.suspended ?? 0, banned: u?.banned ?? 0, withMfa: u?.withMfa ?? 0 },
       organizations: { total: real.length, pending: real.filter((o) => o.status === 'pending').length, byKind },
       signups: days.rows.map((r) => ({ date: r.day, count: Number(r.n) })),
     };
   }
 
   /** Newest first; the cursor is the last row's created_at. */
-  async listUsers(query: { q?: string; status?: 'active' | 'suspended'; limit: number; cursor?: string }) {
+  async listUsers(query: { q?: string; status?: UserStatus; limit: number; cursor?: string }) {
+    await this.liftEndedSuspensions();
     const conditions = [sql`${users.status} <> 'deleted'`];
     if (query.status) conditions.push(eq(users.status, query.status));
     if (query.q) {
@@ -70,6 +84,7 @@ export class PlatformService {
   }
 
   async getUser(userId: string): Promise<PlatformUserDetail> {
+    await this.liftEndedSuspensions();
     const [user] = await this.db.sys.select().from(users).where(eq(users.id, userId));
     if (!user || user.status === 'deleted') throw notFound('user_not_found', 'Person not found');
     const [base] = await this.toPlatformUsers([user]);
@@ -90,6 +105,20 @@ export class PlatformService {
       .select({ n: sql<number>`count(*)::int` })
       .from(sessions)
       .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt), gt(sessions.expiresAt, sql`now()`)));
+    let statusChange: PlatformUserDetail['statusChange'] = null;
+    if (user.statusChangedAt) {
+      const [by] = user.statusChangedByUserId
+        ? await this.db.sys.select({ id: users.id, name: users.fullName }).from(users).where(eq(users.id, user.statusChangedByUserId))
+        : [];
+      statusChange = {
+        status: base!.status,
+        reason: user.statusReason ?? '',
+        message: user.statusMessage,
+        until: base!.suspendedUntil,
+        by: by ? { userId: by.id, name: by.name } : null,
+        at: user.statusChangedAt.toISOString(),
+      };
+    }
     return {
       ...base!,
       identities: identities.map((i) => ({ provider: i.provider, createdAt: i.createdAt.toISOString() })),
@@ -102,29 +131,46 @@ export class PlatformService {
         roles: assignments.filter((a) => a.membershipId === m.id).map((a) => a.key),
       })),
       activeSessions: active?.n ?? 0,
+      statusChange,
     };
   }
 
-  /** Suspending ends every session at once; the person cannot sign in until reactivated. */
-  async setStatus(principal: Principal, userId: string, status: 'active' | 'suspended', reason: string, requestId?: string): Promise<PlatformUserDetail> {
+  /**
+   * Suspend (for a while, or until let back in), ban, or reinstate someone (PLT-2). Suspending and
+   * banning end every session at once; the person is told by email unless `notify` is off, and sees the
+   * message when they try to sign in. Changing a suspension's end (or message) counts as a change too.
+   */
+  async setStatus(principal: Principal, userId: string, input: SetUserStatus, requestId?: string): Promise<PlatformUserDetail> {
+    const { status, reason } = input;
     if (userId === principal.userId) throw conflict('cannot_suspend_self', 'You can’t change your own account status.');
     const [user] = await this.db.sys.select().from(users).where(eq(users.id, userId));
     if (!user || user.status === 'deleted') throw notFound('user_not_found', 'Person not found');
-    if (status === 'suspended' && (await this.authz.isPlatformAdmin(userId))) {
-      throw conflict('cannot_suspend_admin', 'Remove their platform admin role before suspending a platform admin.');
+    if (status !== 'active' && (await this.authz.isPlatformAdmin(userId))) {
+      throw conflict('cannot_suspend_admin', 'Remove their platform admin role before suspending or banning a platform admin.');
     }
-    if (user.status !== status) {
-      await this.db.system(async (tx) => {
-        await tx.update(users).set({ status }).where(eq(users.id, userId));
-        await this.authz.bumpVersion(tx, [userId]);
-        await this.outbox.add(tx, {
-          type: status === 'suspended' ? IamEvents.UserSuspended : IamEvents.UserReactivated,
-          actor: userActor(principal.userId),
-          requestId,
-          payload: { userId, reason },
-        });
+    const until = status === 'suspended' && input.until ? new Date(input.until) : null;
+    const message = input.message?.trim() || null;
+    const changed = user.status !== status || (status === 'suspended' && (user.suspendedUntil?.getTime() ?? null) !== (until?.getTime() ?? null)) || (status !== 'active' && message !== user.statusMessage);
+    if (!changed) return this.getUser(userId);
+    await this.db.system(async (tx) => {
+      await tx
+        .update(users)
+        .set({ status, suspendedUntil: until, statusReason: reason, statusMessage: status === 'active' ? null : message, statusChangedByUserId: principal.userId, statusChangedAt: new Date() })
+        .where(eq(users.id, userId));
+      await this.authz.bumpVersion(tx, [userId]);
+      await this.outbox.add(tx, {
+        type: status === 'suspended' ? IamEvents.UserSuspended : status === 'banned' ? IamEvents.UserBanned : IamEvents.UserReactivated,
+        actor: userActor(principal.userId),
+        requestId,
+        payload: { userId, reason, until: until?.toISOString() ?? null },
       });
-      if (status === 'suspended') await this.sessions.revoke({ userId }, `suspended: ${reason}`.slice(0, 200), principal.userId, requestId ?? null);
+    });
+    if (status !== 'active') await this.sessions.revoke({ userId }, `${status}: ${reason}`.slice(0, 200), principal.userId, requestId ?? null);
+    // Told by email (to a verified address only); a failed email never undoes the change.
+    if (input.notify !== false && user.email && user.emailVerifiedAt) {
+      await this.notifier
+        .sendAccountNotice({ destination: user.email, name: user.fullName, status, until, message })
+        .catch(() => undefined);
     }
     return this.getUser(userId);
   }
@@ -226,7 +272,8 @@ export class PlatformService {
         fullName: r.fullName,
         email: r.email,
         phone: r.phone,
-        status: r.status === 'suspended' ? 'suspended' : 'active',
+        status: (r.status === 'suspended' || r.status === 'banned' ? r.status : 'active') as UserStatus,
+        suspendedUntil: r.status === 'suspended' ? (r.suspendedUntil?.toISOString() ?? null) : null,
         verified: !!(r.emailVerifiedAt || r.phoneVerifiedAt),
         mfaEnabled: !!r.mfaEnabledAt,
         platformAdmin: adminIds.has(r.id),

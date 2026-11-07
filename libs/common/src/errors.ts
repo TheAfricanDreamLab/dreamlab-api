@@ -28,7 +28,8 @@ export class AppException extends HttpException {
 export const badRequest = (code: string, message: string, details?: unknown) =>
   new AppException(HttpStatus.BAD_REQUEST, code, message, details);
 export const unauthorized = (code: string, message: string) => new AppException(HttpStatus.UNAUTHORIZED, code, message);
-export const forbidden = (code: string, message: string) => new AppException(HttpStatus.FORBIDDEN, code, message);
+export const forbidden = (code: string, message: string, details?: unknown) =>
+  new AppException(HttpStatus.FORBIDDEN, code, message, details);
 export const notFound = (code: string, message: string) => new AppException(HttpStatus.NOT_FOUND, code, message);
 export const conflict = (code: string, message: string, details?: unknown) =>
   new AppException(HttpStatus.CONFLICT, code, message, details);
