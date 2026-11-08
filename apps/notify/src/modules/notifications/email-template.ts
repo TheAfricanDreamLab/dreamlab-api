@@ -11,6 +11,7 @@ const EYEBROW: Record<NotificationCategory, string> = {
   admissions: 'Admissions',
   community: 'Mentors and circles',
   circles: 'Your Dream Circle',
+  progress: 'Staying on track',
   account: 'Your account',
 };
 
@@ -31,9 +32,18 @@ const ACTIONS: [RegExp, string][] = [
   [/^\/app\/credentials/, 'See your credential'],
 ];
 
-function actionLabel(link: string): string {
+/**
+ * Labels that depend on why the email was sent, tried before ACTIONS: a reminder that links to a
+ * lesson takes the learner back into it, where a grade email linking there shows the result.
+ */
+const CATEGORY_ACTIONS: Partial<Record<NotificationCategory, [RegExp, string][]>> = {
+  progress: [[/^\/learn\//, 'Pick up where you left off']],
+};
+
+function actionLabel(link: string, category?: NotificationCategory): string {
   const path = link.startsWith('/') ? link : new URL(link).pathname;
-  return ACTIONS.find(([re]) => re.test(path))?.[1] ?? 'Open The African Dream Lab';
+  const rules = [...((category && CATEGORY_ACTIONS[category]) || []), ...ACTIONS];
+  return rules.find(([re]) => re.test(path))?.[1] ?? 'Open The African Dream Lab';
 }
 
 /** One notification as a designed email, linking back to the app. */
@@ -51,7 +61,7 @@ export function notificationEmail(
     eyebrow: n.category ? EYEBROW[n.category] : undefined,
     heading: n.title,
     paragraphs: [`Hi ${first},`, n.body],
-    button: url ? { label: actionLabel(n.link!), url } : undefined,
+    button: url ? { label: actionLabel(n.link!, n.category), url } : undefined,
     reason: 'You’re getting this because of your email settings on The African Dream Lab.',
     manageUrl: new URL('/app/account#notifications', appUrl).href,
   });

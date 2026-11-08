@@ -95,7 +95,7 @@ export class CatalogAdminService {
       })),
       capstoneStages: stages.map((st) => ({ name: st.name, outputDocument: st.outputDocument, creditHours: st.creditHours, summary: st.summary })),
       graduationRequirements: requirements.map((r) => ({ key: r.key, label: r.label })),
-      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput })),
+      calendar: weeks.map((w) => ({ weekNo: w.weekNo, phase: (w.phaseId && phaseName.get(w.phaseId)) || '', focus: w.focus, majorOutput: w.majorOutput, kind: w.kind })),
     };
   }
 
