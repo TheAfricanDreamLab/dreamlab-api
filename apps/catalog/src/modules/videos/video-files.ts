@@ -11,6 +11,8 @@ export const folderOf = (id: string): string => `videos/${id}/`;
 export const versionFolder = (id: string, version: number): string => `videos/${id}/v${version}/`;
 export const manifestPath = (id: string): string => `videos/${id}/manifest.json`;
 export const captionPath = (id: string, lang: string): string => `videos/${id}/captions/${lang}.vtt`;
+/** The audio-only version beside the streams, for listening on little data. */
+export const AUDIO_FILE = 'audio.m4a';
 export const mediaUrl = (path: string): string => `/media/${path}`;
 
 /** Streams and pictures never change once written (each processing writes a new version folder). */
@@ -25,6 +27,15 @@ export interface ManifestInput {
   width: number;
   height: number;
   captions: { lang: string; label: string; source: string; updatedAt: Date }[];
+  /** Stream and audio sizes, kept on the video row so a manifest rewritten for captions still has them. */
+  sizes?: StreamSizes | null;
+}
+
+/** What each stream of a processed version weighs (LRN-9); null for videos processed before this was measured. */
+export interface StreamSizes {
+  renditions: { height: number; bytes: number }[];
+  /** The audio-only file (`audio.m4a`), when the video has sound. */
+  audio: { bytes: number } | null;
 }
 
 export function manifestOf(v: ManifestInput): VideoManifest {
@@ -37,6 +48,8 @@ export function manifestOf(v: ManifestInput): VideoManifest {
     poster: `v${v.version}/poster.jpg`,
     thumbnail: `v${v.version}/thumb.jpg`,
     captions: v.captions.map((c) => ({ lang: c.lang, label: c.label, src: `captions/${c.lang}.vtt?v=${c.updatedAt.getTime()}`, auto: c.source === 'auto' })),
+    ...(v.sizes ? { renditions: v.sizes.renditions } : {}),
+    ...(v.sizes?.audio ? { audio: { src: `v${v.version}/${AUDIO_FILE}`, bytes: v.sizes.audio.bytes } } : {}),
   };
 }
 

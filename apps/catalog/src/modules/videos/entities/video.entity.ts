@@ -1,4 +1,5 @@
 import type { CaptionCue } from '@dreamlab/contracts';
+import type { StreamSizes } from '../video-files';
 import { bigint, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /**
@@ -23,6 +24,8 @@ export const videos = pgTable(
     width: integer('width'),
     height: integer('height'),
     renditions: integer('renditions').array().notNull().default([]),
+    /** Bytes of each stream and the audio-only file in the current version (LRN-9); null before they were measured. */
+    streamSizes: jsonb('stream_sizes').$type<StreamSizes>(),
     /** The public output folder in use (v1, v2…); 0 until first processed. */
     version: integer('version').notNull().default(0),
     createdByUserId: uuid('created_by_user_id').notNull(),

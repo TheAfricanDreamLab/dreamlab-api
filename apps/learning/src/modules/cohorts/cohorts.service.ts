@@ -80,7 +80,12 @@ export const toCalendarWeek = (w: WeekRow): CalendarWeek => ({
   phase: w.phaseName,
   focus: w.focus,
   majorOutput: w.majorOutput,
+  kind: w.kind,
 });
+
+/** A programme week's kind; programmes that don't say (or catalogs that predate it) are learning weeks. */
+export const weekKind = (w: { kind?: string | null }): "learning" | "catch_up" =>
+  w.kind === "catch_up" ? "catch_up" : "learning";
 
 export const toSession = (s: SessionRow): ClassSession => ({
   id: s.id,
@@ -273,6 +278,7 @@ export class CohortsService {
             phaseName: w.phase,
             focus: w.focus,
             majorOutput: w.majorOutput,
+            kind: weekKind(w),
             startsOn: addDays(input.startsOn, (w.weekNo - 1) * 7),
             endsOn: addDays(input.startsOn, w.weekNo * 7 - 1),
           })),
@@ -634,6 +640,18 @@ export class CohortsService {
       );
     }
     return { cohort, session };
+  }
+
+  /**
+   * Who looks after the cohort's learners day to day: its managers and its teachers (course_run.teach
+   * on the cohort). They see engagement and send check-ins (LRN-9).
+   */
+  async isCohortManagerOrTeacher(p: Principal, cohort: CohortRow): Promise<boolean> {
+    if (await this.isCohortManager(p, cohort)) return true;
+    return (
+      cohort.hostOrgId === p.orgId &&
+      this.may(p, cohort.hostOrgId, "course_run.teach", "cohort", cohort.id)
+    );
   }
 
   /** Runs the cohort: cohort.manage in its host organisation (platform admins too). */

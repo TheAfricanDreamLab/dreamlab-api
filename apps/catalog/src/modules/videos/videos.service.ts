@@ -196,7 +196,7 @@ export class VideosService {
     const [row] = await this.db.sys.select().from(videos).where(eq(videos.id, id));
     if (!row || row.status !== 'ready' || !row.durationS || !row.width || !row.height) return;
     const tracks = await this.db.sys.select().from(videoCaptions).where(eq(videoCaptions.videoId, id)).orderBy(videoCaptions.lang);
-    await writeManifest(this.storage, { id, version: row.version, durationS: row.durationS, width: row.width, height: row.height, captions: tracks });
+    await writeManifest(this.storage, { id, version: row.version, durationS: row.durationS, width: row.width, height: row.height, captions: tracks, sizes: row.streamSizes });
   }
 
   // ---------- publishing checks ----------

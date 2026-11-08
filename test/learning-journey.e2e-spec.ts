@@ -25,6 +25,9 @@ import {
   LibraryVideo,
   Presence,
   VideoUploadLink,
+  VideoManifestSchema,
+  ProgramAuthoring,
+  ProgramDetail,
   videoBlockId,
   CourseAuthoringSchema,
   CourseProgress,
@@ -32,8 +35,13 @@ import {
   ItemAuthoring,
   ItemView,
   isInteractiveBlock,
+  CircleProgress,
   CirclePost,
   CirclePostPage,
+  CohortEngagement,
+  CompletionFunnel,
+  OnTrack,
+  ProgramOnTrack,
   CircleSpace,
   CircleUploadTicket,
   MyCommunity,
@@ -51,7 +59,7 @@ import type { EmailMessage, EmailSender } from '@lib/email';
 import { type LiveRole, MeetKit } from '@lib/meet-kit';
 import type { BlobStorage } from '@lib/storage';
 import { E2E_GATEWAY_TOKEN, eventually, request, testEnv } from '@lib/testing';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { Logger } from 'nestjs-pino';
 import { CatalogAppModule } from '../apps/catalog/src/app.module';
@@ -60,6 +68,7 @@ import { catalogMigrationsFolder } from '../apps/catalog/src/database';
 import { CatalogSeedService } from '../apps/catalog/src/modules/seed/catalog-seed.service';
 import { STORAGE as CATALOG_STORAGE } from '../apps/catalog/src/modules/authoring/authoring.service';
 import { VideoWorker } from '../apps/catalog/src/modules/videos/video-worker';
+import { CatalogRpcController } from '../apps/catalog/src/modules/courses/catalog-rpc.controller';
 import { DATASETS } from '../apps/catalog/src/modules/seed/datasets';
 import { IamAppModule } from '../apps/iam/src/app.module';
 import { iamConfigSchema } from '../apps/iam/src/config';
@@ -70,10 +79,11 @@ import { NOTIFIER } from '../apps/iam/src/modules/notifications/notifier.service
 import { SeedService } from '../apps/iam/src/modules/seed/seed.service';
 import { LearningAppModule } from '../apps/learning/src/app.module';
 import { learningConfigSchema } from '../apps/learning/src/config';
-import { learningMigrationsFolder } from '../apps/learning/src/database';
-import { todayIn } from '../apps/learning/src/modules/cohorts/calendar-time';
+import { learningMigrationsFolder, schema as learningSchema } from '../apps/learning/src/database';
+import { addDays, todayIn, zonedTime } from '../apps/learning/src/modules/cohorts/calendar-time';
 import { SessionRemindersService } from '../apps/learning/src/modules/cohorts/session-reminders.service';
 import { CircleSchedulerService } from '../apps/learning/src/modules/community/circle-scheduler.service';
+import { ProgressRemindersService } from '../apps/learning/src/modules/engagement/progress-reminders.service';
 import { MEET_KIT } from '../apps/learning/src/modules/community/live.service';
 import { FilesService, STORAGE } from '../apps/learning/src/modules/files/files.service';
 import { AdmissionsAppModule } from '../apps/admissions/src/app.module';
@@ -298,6 +308,7 @@ describe('contract parity', () => {
     ['admissions', () => admissions, apiV1Contract.admissions],
     ['learning (live and community)', () => learning, apiV1Contract.community],
     ['catalog (instructors)', () => catalog, apiV1Contract.instructors],
+    ['learning (staying on track)', () => learning, apiV1Contract.engagement],
   ] as const)('the %s service serves every one of its contract routes', (_name, app, router) => {
     const doc = buildOpenApiDocument(app(), { title: 't', description: 'd', version: '0' });
     const missing = routes(router)
@@ -351,6 +362,22 @@ describe('catalog', () => {
     const strip = (d: Record<string, unknown>) => JSON.parse(JSON.stringify(d, (k, v) => (k === 'id' ? undefined : v)));
     expect(strip(after)).toEqual(strip(before));
     expect((await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(await signUp('nosy@example.com', 'Nosy Learner')))).status).toBe(403);
+
+    // LRN-9: weeks are learning weeks unless marked as catch-up weeks; the kind is kept and shown.
+    const authored = exported.body as ProgramAuthoring;
+    expect(authored.calendar.every((w) => w.kind === 'learning')).toBe(true);
+    const calendar = authored.calendar.map((w) => (w.weekNo === 8 ? { ...w, kind: 'catch_up' } : w));
+    expect((await request(catalog, 'POST', '/v1/catalog/admin/programs/import', { ...L(admin), body: { ...authored, calendar } })).status).toBe(200);
+    const marked = (await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as ProgramDetail;
+    expect(marked.calendar.filter((w) => w.kind === 'catch_up').map((w) => w.weekNo)).toEqual([8]);
+    expect((await request(catalog, 'GET', '/v1/catalog/admin/programs/the-african-dream-lab', L(admin))).body).toMatchObject({ calendar: expect.arrayContaining([expect.objectContaining({ weekNo: 8, kind: 'catch_up' })]) });
+    // Learning gets the calendar, kind included, over RPC when it schedules a cohort.
+    const rpc = (await catalog.get(CatalogRpcController).program({ slug: 'the-african-dream-lab' })) as ProgramDetail;
+    expect(rpc.calendar.find((w) => w.weekNo === 8)).toMatchObject({ kind: 'catch_up' });
+    // Without the field (older programme files), every week is a learning week again.
+    const unmarked = authored.calendar.map(({ kind: _kind, ...w }) => w);
+    expect((await request(catalog, 'POST', '/v1/catalog/admin/programs/import', { ...L(admin), body: { ...authored, calendar: unmarked } })).status).toBe(200);
+    expect(strip((await request(catalog, 'GET', '/v1/catalog/programs/the-african-dream-lab')).body as Record<string, unknown>)).toEqual(strip(before));
   });
 
   it('re-seeding identical content publishes no new version', async () => {
@@ -1107,7 +1134,15 @@ describe('course authoring in the browser (CAT-3)', () => {
       const ready = (await request(catalog, 'GET', `${videos}/${videoId}`, L(author))).body as LibraryVideo;
       expect(ready).toMatchObject({ status: 'ready', durationS: 4, width: 1280, height: 720, renditions: [360, 720], manifestUrl: `/media/videos/${videoId}/manifest.json`, posterUrl: `/media/videos/${videoId}/v1/poster.jpg` });
       const storage = catalog.get<BlobStorage>(CATALOG_STORAGE);
-      for (const file of ['manifest.json', 'v1/master.m3u8', 'v1/360p/index.m3u8', 'v1/720p/index.m3u8', 'v1/poster.jpg', 'v1/thumb.jpg']) expect(await storage.stat('public', `videos/${videoId}/${file}`)).not.toBeNull();
+      for (const file of ['manifest.json', 'v1/master.m3u8', 'v1/360p/index.m3u8', 'v1/720p/index.m3u8', 'v1/poster.jpg', 'v1/thumb.jpg', 'v1/audio.m4a']) expect(await storage.stat('public', `videos/${videoId}/${file}`)).not.toBeNull();
+      // LRN-9: what each stream weighs, and the audio-only version.
+      const manifestFile = join(tmpdir(), `manifest-${videoId}.json`);
+      await storage.downloadToFile('public', `videos/${videoId}/manifest.json`, manifestFile);
+      const manifest = VideoManifestSchema.parse(JSON.parse(readFileSync(manifestFile, 'utf8')));
+      expect(manifest.renditions?.map((r) => r.height)).toEqual([360, 720]);
+      expect(manifest.renditions![0]!.bytes).toBeGreaterThan(0);
+      expect(manifest.renditions![1]!.bytes).toBeGreaterThan(manifest.renditions![0]!.bytes);
+      expect(manifest.audio).toEqual({ src: 'v1/audio.m4a', bytes: (await storage.stat('public', `videos/${videoId}/v1/audio.m4a`))!.size });
       // The original stays private.
       expect(await storage.stat('public', `videos/${videoId}/source`)).toBeNull();
       expect(((await request(catalog, 'GET', `${videos}?q=bronze`, L(author))).body as { items: LibraryVideo[] }).items.map((v) => v.id)).toEqual([videoId]);
@@ -1671,6 +1706,246 @@ describe('live classes, mentors and Dream Circles (LIVE-1, COMM-1)', () => {
     expect(await scheduler.tidy()).toBe(0);
     expect(await scheduler.tidy(new Date(Date.now() + 25 * 3_600_000))).toBeGreaterThanOrEqual(1);
     expect((await request(learning, 'POST', `${base}/posts`, { ...L(ada), body: { attachmentIds: [orphan.attachmentId] } })).status).toBe(400);
+  });
+});
+
+describe('staying on track (LRN-9)', () => {
+  let owner: string;
+  let teacher: string;
+  let ada: string;
+  let bayo: string;
+  let solo: string;
+  let outsider: string;
+  let orgId: string;
+  let cohort: CohortDetail;
+  let adaProgram: MyProgram;
+  let bayoProgram: MyProgram;
+  let soloEnrollment: Enrollment;
+  const ids: Record<string, string> = {};
+  const db = () => learning.get<DatabaseService<typeof learningSchema>>(DATABASE);
+  const lagos = 'Africa/Lagos';
+  // Reminders go in the daytime, so the scheduler runs at noon in Lagos and timestamps are set around it.
+  const noon = zonedTime(todayIn(lagos), '12:00', lagos);
+  const daysBefore = (days: number, from = noon) => new Date(from.getTime() - days * 86_400_000);
+  const userId = async (token: string) => ((await request(iam, 'GET', '/v1/me', L(token))).body as { user: { id: string } }).user.id;
+  const progressNotes = (token: string, min = 1) => notificationsFor(token, (n) => n.category === 'progress', min);
+
+  const tokenFor = async (email: string, name: string) => {
+    const personal = await signUp(email, name);
+    expect((await request(iam, 'POST', '/v1/invitations/accept', { token: personal, body: { token: notifier.lastInviteToken(email) } })).status).toBe(200);
+    const switched = (await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string };
+    ids[email] = await userId(switched.accessToken);
+    return switched.accessToken;
+  };
+
+  beforeAll(async () => {
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const personal = await signUp('owner@ilorin-hub.test', 'Ebun Owner');
+    orgId = ((await request(iam, 'POST', '/v1/orgs', { token: admin, body: { slug: 'ilorin-hub', name: 'Ilorin Hub', kinds: ['enterprise'], firstAdmin: { email: 'owner@ilorin-hub.test' } } })).body as { id: string })
+      .id;
+    owner = ((await request(iam, 'POST', '/v1/auth/switch-org', { token: personal, body: { orgId } })).body as { accessToken: string }).accessToken;
+    for (const [email, role] of [
+      ['teacher@ilorin-hub.test', 'instructor'],
+      ['ada@ilorin-hub.test', 'learner'],
+      ['bayo@ilorin-hub.test', 'learner'],
+    ] as const) {
+      expect((await request(iam, 'POST', `/v1/orgs/${orgId}/invitations`, { token: owner, body: { email, roleKeys: [role] } })).status).toBe(201);
+    }
+    teacher = await tokenFor('teacher@ilorin-hub.test', 'Tola Teacher');
+    ada = await tokenFor('ada@ilorin-hub.test', 'Ada Ige');
+    bayo = await tokenFor('bayo@ilorin-hub.test', 'Bayo Ojo');
+    solo = await signUp('solo@learner.test', 'Sola Solo');
+    outsider = await signUp('outsider@ontrack.test', 'Olu Outsider');
+
+    // Started two weeks ago, so this is week 3: half way through the first phase (weeks 1–4).
+    const created = await request(learning, 'POST', '/v1/learning/cohorts', { ...L(owner), body: { programSlug: 'the-african-dream-lab', name: 'Ilorin 01', startsOn: addDays(todayIn(lagos), -14) } });
+    expect(created.status).toBe(201);
+    cohort = created.body as CohortDetail;
+    expect(cohort.calendar.every((w) => w.kind === 'learning')).toBe(true);
+    expect((await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(owner), body: { status: 'open' } })).status).toBe(200);
+    adaProgram = (await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(ada), body: {} })).body as MyProgram;
+    bayoProgram = (await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/join`, { ...L(bayo), body: {} })).body as MyProgram;
+    expect((await request(learning, 'PATCH', `/v1/learning/cohorts/${cohort.id}`, { ...L(owner), body: { status: 'running' } })).status).toBe(200);
+    soloEnrollment = (await request(learning, 'POST', '/v1/learning/enrollments', { ...L(solo), body: { courseSlug: 'problem-solving' } })).body as Enrollment;
+  });
+
+  it('keeps a goal and study plan in the learner’s own words, for their own enrolments only', async () => {
+    const url = `/v1/learning/me/goals/program/${adaProgram.enrollment.id}`;
+    expect(await request(learning, 'GET', url, L(ada))).toMatchObject({ status: 200, body: { goal: null } });
+    expect((await request(learning, 'PUT', url, { ...L(ada), body: { why: 'Too short', studyDays: ['mon'], minutesPerWeek: 120 } })).status).toBe(400);
+    const goal = { why: 'I want to grow my tailoring shop into a brand', success: 'Two new stores', studyDays: ['tue', 'thu'], studyTime: '19:30', minutesPerWeek: 180 };
+    const saved = await request(learning, 'PUT', url, { ...L(ada), body: goal });
+    expect(saved).toMatchObject({ status: 200, body: { ...goal, scope: 'program', enrollmentId: adaProgram.enrollment.id } });
+    const changed = await request(learning, 'PUT', url, { ...L(ada), body: { ...goal, minutesPerWeek: 240 } });
+    expect(changed.body).toMatchObject({ id: (saved.body as { id: string }).id, minutesPerWeek: 240 });
+    expect((await request(learning, 'GET', url, L(ada))).body).toMatchObject({ goal: { why: goal.why, minutesPerWeek: 240 } });
+    // Someone else's enrolment, or a course enrolment under the programme's scope: not found.
+    expect((await request(learning, 'GET', url, L(bayo))).status).toBe(404);
+    expect((await request(learning, 'PUT', url, { ...L(bayo), body: goal })).status).toBe(404);
+    expect((await request(learning, 'GET', `/v1/learning/me/goals/program/${soloEnrollment.id}`, L(solo))).status).toBe(404);
+    const course = `/v1/learning/me/goals/course/${soloEnrollment.id}`;
+    expect((await request(learning, 'PUT', course, { ...L(solo), body: { why: 'I keep starting things and never finishing them', studyDays: ['sat'], minutesPerWeek: 60 } })).status).toBe(200);
+  });
+
+  it('shows a course’s pace, a short catch-up list and the first steps', async () => {
+    const url = `/v1/learning/enrollments/${soloEnrollment.id}/on-track`;
+    expect((await request(learning, 'GET', url, L(ada))).status).toBe(404);
+    const fresh = (await request(learning, 'GET', url, L(solo))).body as OnTrack;
+    expect(fresh).toMatchObject({ pace: 'not_started', progressPct: 0, expectedPct: null, daysQuiet: 0, onboarding: { goalSet: true, firstItemDone: false, introducedInCircle: null, done: false } });
+    expect(fresh.goal).toMatchObject({ scope: 'course', studyDays: ['sat'] });
+    expect(fresh.catchUp).toHaveLength(3);
+    expect(fresh.catchUp[0]).toMatchObject({ enrollmentId: soloEnrollment.id, courseSlug: 'problem-solving', courseTitle: 'Problem Solving' });
+
+    // Opening the first item starts the course: on track while learning on their own, until they go quiet.
+    expect((await request(learning, 'GET', `/v1/learning/enrollments/${soloEnrollment.id}/items/${fresh.catchUp[0]!.itemId}`, L(solo))).status).toBe(200);
+    expect((await request(learning, 'GET', url, L(solo))).body).toMatchObject({ pace: 'on_track', catchUp: [] });
+    await db().sys.update(learningSchema.courseEnrollments).set({ lastActiveAt: daysBefore(8, new Date()) }).where(eq(learningSchema.courseEnrollments.id, soloEnrollment.id));
+    const quiet = (await request(learning, 'GET', url, L(solo))).body as OnTrack;
+    expect(quiet).toMatchObject({ pace: 'behind', daysQuiet: 8 });
+    expect(quiet.catchUp[0]!.itemId).toBe(fresh.catchUp[0]!.itemId);
+  });
+
+  it('measures a programme against the cohort calendar, leaving catch-up weeks out, and shows the way to the certificate', async () => {
+    const url = `/v1/learning/me/programs/${adaProgram.enrollment.id}/on-track`;
+    expect((await request(learning, 'GET', url, L(bayo))).status).toBe(404);
+    const before = (await request(learning, 'GET', url, L(ada))).body as ProgramOnTrack;
+    expect(before).toMatchObject({ pace: 'not_started', catchUpWeek: false, onboarding: { goalSet: true, firstItemDone: false, introducedInCircle: null } });
+    expect(before.expectedPct).toBeGreaterThan(0);
+    expect(before.catchUp.length).toBeGreaterThan(0);
+    const keys = before.certificate.steps.map((s) => s.key);
+    expect(keys).toContain('course:problem-solving');
+    expect(keys.some((k) => k.startsWith('stage:'))).toBe(true);
+    expect(before.certificate).toMatchObject({ done: 0, total: before.certificate.steps.length });
+    expect(before.certificate.steps.find((s) => s.key.startsWith('course:'))!.href).toMatch(/^\/learn\//);
+
+    // A course of the first phase: week 3 of 4, two weeks and a day of lessons gone.
+    const first = adaProgram.courses.find((c) => c.course.slug === 'problem-solving')!;
+    const course = `/v1/learning/enrollments/${first.enrollmentId}/on-track`;
+    const item = ((await request(learning, 'GET', course, L(ada))).body as OnTrack).catchUp[0]!;
+    expect((await request(learning, 'GET', `/v1/learning/enrollments/${first.enrollmentId}/items/${item.itemId}`, L(ada))).status).toBe(200);
+    expect((await request(learning, 'GET', course, L(ada))).body).toMatchObject({ pace: 'far_behind', expectedPct: 54, goal: { scope: 'program' } });
+
+    // This week becomes a catch-up week: no new lessons, so less is expected by now.
+    await db().sys.update(learningSchema.calendarWeeks).set({ kind: 'catch_up' }).where(and(eq(learningSchema.calendarWeeks.cohortId, cohort.id), eq(learningSchema.calendarWeeks.weekNo, 3)));
+    expect((await request(learning, 'GET', course, L(ada))).body).toMatchObject({ expectedPct: 67 });
+    expect((await request(learning, 'GET', url, L(ada))).body).toMatchObject({ catchUpWeek: true });
+    const mine = ((await request(learning, 'GET', '/v1/learning/me/programs', L(ada))).body as { items: MyProgram[] }).items.find((p) => p.cohort.id === cohort.id)!;
+    expect(mine.thisWeek).toMatchObject({ weekNo: 3, kind: 'catch_up' });
+  });
+
+  it('reminds quiet learners by email, at most once every three days, about their programme rather than each course', async () => {
+    const reminders = learning.get(ProgressRemindersService);
+    // Bayo joined two days ago and has not started; Sola went quiet six days ago; Ada is active.
+    await db().sys.update(learningSchema.programEnrollments).set({ enrolledAt: daysBefore(2) }).where(eq(learningSchema.programEnrollments.id, bayoProgram.enrollment.id));
+    await db().sys.update(learningSchema.courseEnrollments).set({ enrolledAt: daysBefore(2) }).where(eq(learningSchema.courseEnrollments.programEnrollmentId, bayoProgram.enrollment.id));
+    await db().sys.update(learningSchema.courseEnrollments).set({ enrolledAt: daysBefore(10), lastActiveAt: daysBefore(6) }).where(eq(learningSchema.courseEnrollments.id, soloEnrollment.id));
+    await db().sys.update(learningSchema.courseEnrollments).set({ lastActiveAt: noon }).where(eq(learningSchema.courseEnrollments.programEnrollmentId, adaProgram.enrollment.id));
+    // Not at night.
+    expect(await reminders.run(zonedTime(todayIn(lagos), '22:00', lagos))).toBe(0);
+
+    expect(await reminders.run(noon)).toBeGreaterThanOrEqual(2);
+    const [soloNote] = await progressNotes(solo);
+    expect(soloNote).toMatchObject({ title: 'Pick up where you left off: Problem Solving', link: expect.stringMatching(new RegExp(`^/learn/${soloEnrollment.id}/[0-9a-f-]{36}$`)) });
+    expect(soloNote!.body).toContain('You said: “I keep starting things and never finishing them”');
+    expect(soloNote!.body).toContain('Everything you have done so far is saved');
+    const [bayoNote] = await progressNotes(bayo);
+    expect(bayoNote).toMatchObject({ title: `Ready when you are: ${cohort.programTitle}`, link: '/app/programme' });
+    await eventually(() => mail.to('solo@learner.test').some((m) => m.subject.includes('Pick up where you left off')));
+    expect(((await request(notify, 'GET', '/v1/notifications', L(ada))).body as { items: Notification[] }).items.filter((n) => n.category === 'progress')).toEqual([]);
+
+    // Twelve quiet days now, but the last reminder was today: nothing until three days have passed.
+    await db().sys.update(learningSchema.courseEnrollments).set({ lastActiveAt: daysBefore(12) }).where(eq(learningSchema.courseEnrollments.id, soloEnrollment.id));
+    await reminders.run(new Date(noon.getTime() + 3_600_000));
+    await reminders.run(new Date(noon.getTime() + 2 * 86_400_000));
+    const later = new Date(noon.getTime() + 3 * 86_400_000 + 3_600_000);
+    await reminders.run(later);
+    await progressNotes(solo, 2);
+    const log = await db().sys.select().from(learningSchema.progressReminders).where(eq(learningSchema.progressReminders.enrollmentId, soloEnrollment.id));
+    expect(log.map((r) => r.kind).sort()).toEqual(['quiet_12', 'quiet_5']);
+    expect(await reminders.run(later)).toBe(0);
+    expect(log.every((r) => r.returnedAt === null)).toBe(true);
+
+    // Coming back counts as answering the reminders.
+    const back = (await request(learning, 'GET', `/v1/learning/enrollments/${soloEnrollment.id}/on-track`, L(solo))).body as OnTrack;
+    expect((await request(learning, 'GET', `/v1/learning/enrollments/${soloEnrollment.id}/items/${back.catchUp[0]!.itemId}`, L(solo))).status).toBe(200);
+    const after = await db().sys.select().from(learningSchema.progressReminders).where(eq(learningSchema.progressReminders.enrollmentId, soloEnrollment.id));
+    expect(after.every((r) => r.returnedAt !== null)).toBe(true);
+  });
+
+  it('shows cohort staff who is at risk, and lets them check in personally', async () => {
+    ids.bayo = await userId(bayo);
+    ids.ada = await userId(ada);
+    // Bayo joined a month ago and has done nothing since.
+    await db().sys.update(learningSchema.programEnrollments).set({ enrolledAt: daysBefore(30, new Date()) }).where(eq(learningSchema.programEnrollments.id, bayoProgram.enrollment.id));
+    const url = `/v1/learning/cohorts/${cohort.id}/engagement`;
+    expect((await request(learning, 'GET', url, L(outsider))).status).toBe(404);
+    expect((await request(learning, 'GET', url, L(ada))).status).toBe(403);
+    const view = (await request(learning, 'GET', url, L(owner))).body as CohortEngagement;
+    expect(view.summary).toMatchObject({ learners: 2, inactive: 1 });
+    expect(view.items.map((i) => i.name)).toEqual(['Bayo Ojo', 'Ada Ige']);
+    expect(view.items[0]).toMatchObject({ risk: 'inactive', pace: 'not_started', goalSet: false, lastActiveAt: null, lastReminderAt: expect.any(String), lastCheckInAt: null });
+    expect(view.items[1]).toMatchObject({ goalSet: true, lastReminderAt: null });
+    expect(view.items[1]!.daysQuiet).toBeLessThan(2);
+    expect((await request(learning, 'GET', `${url}?risk=inactive`, L(teacher))).body).toMatchObject({ items: [{ name: 'Bayo Ojo' }] });
+
+    const checkIns = `/v1/learning/cohorts/${cohort.id}/check-ins`;
+    const message = 'Hello Bayo, how are things going? Tell me if anything is in the way.';
+    expect((await request(learning, 'POST', checkIns, { ...L(ada), body: { userIds: [ids.bayo], message } })).status).toBe(403);
+    expect(await request(learning, 'POST', checkIns, { ...L(owner), body: { userIds: [ids.bayo, await userId(outsider)], message } })).toMatchObject({ status: 404, body: { code: 'learner_not_in_cohort' } });
+    expect(await request(learning, 'POST', checkIns, { ...L(teacher), body: { userIds: [ids.bayo], message } })).toMatchObject({ status: 200, body: { sent: 1 } });
+    const notes = await notificationsFor(bayo, (n) => n.title === 'Tola sent you a note');
+    expect(notes.find((n) => n.title === 'Tola sent you a note')).toMatchObject({ category: 'progress', body: message, link: '/app/programme' });
+    expect(((await request(learning, 'GET', url, L(owner))).body as CohortEngagement).items[0]).toMatchObject({ name: 'Bayo Ojo', lastCheckInAt: expect.any(String) });
+  });
+
+  it('counts the completion funnel for a cohort and for a course', async () => {
+    const url = `/v1/learning/cohorts/${cohort.id}/funnel`;
+    expect((await request(learning, 'GET', url, L(teacher))).status).toBe(403);
+    expect((await request(learning, 'GET', url, L(outsider))).status).toBe(403);
+    const funnel = (await request(learning, 'GET', url, L(owner))).body as CompletionFunnel;
+    expect(funnel.scope).toEqual({ kind: 'cohort', id: cohort.id, title: 'Ilorin 01' });
+    expect(Object.fromEntries(funnel.stages.map((s) => [s.key, s.count]))).toEqual({ enrolled: 2, started: 1, first_week: 1, quarter: 0, half: 0, three_quarters: 0, completed: 0 });
+    expect(funnel.stages[0]).toMatchObject({ key: 'enrolled', label: 'Enrolled' });
+    expect(funnel).toMatchObject({ dropped: 1, medianDropDay: 0, reminders: { sent: 1, returnedWithin7Days: 0 }, checkIns: { sent: 1, returnedWithin7Days: 0 } });
+    expect(funnel.weekly).toHaveLength(26);
+    expect(funnel.weekly.at(-1)!.active).toBe(1);
+
+    const course = '/v1/learning/admin/courses/problem-solving/funnel';
+    expect((await request(learning, 'GET', course, L(owner))).status).toBe(403);
+    const admin = ((await request(iam, 'POST', '/v1/auth/login', { body: { identifier: 'admin@theafricandreamlab.com', password: 'e2e-admin-password' } })).body as { accessToken: string })
+      .accessToken;
+    const byCourse = (await request(learning, 'GET', course, L(admin))).body as CompletionFunnel;
+    expect(byCourse.scope).toMatchObject({ kind: 'course', title: 'Problem Solving' });
+    expect(byCourse.stages[0]!.count).toBeGreaterThanOrEqual(3);
+    expect(byCourse.reminders.sent).toBeGreaterThanOrEqual(2);
+    expect(byCourse.reminders.returnedWithin7Days).toBeGreaterThanOrEqual(1);
+    expect((await request(learning, 'GET', '/v1/learning/admin/courses/no-such-course/funnel', L(admin))).status).toBe(404);
+  });
+
+  it('shares a member’s week with their circle only when they choose to', async () => {
+    const created = await request(learning, 'POST', `/v1/learning/cohorts/${cohort.id}/circles`, { ...L(owner), body: { name: 'Circle One', memberUserIds: [ids.ada, ids.bayo] } });
+    expect(created.status).toBe(201);
+    const circleId = ((await request(learning, 'GET', '/v1/learning/me/community', L(ada))).body as MyCommunity).circles.find((c) => c.cohortName === 'Ilorin 01')!.id;
+    const url = `/v1/learning/circles/${circleId}/progress`;
+    expect((await request(learning, 'GET', url, L(outsider))).status).toBe(404);
+    expect((await request(learning, 'GET', url, L(ada))).body).toMatchObject({ sharing: false, members: [], notSharing: 2 });
+
+    const shared = (await request(learning, 'PUT', `${url}/sharing`, { ...L(ada), body: { share: true } })).body as CircleProgress;
+    expect(shared).toMatchObject({ sharing: true, notSharing: 1, members: [{ userId: ids.ada, name: 'Ada Ige' }] });
+    expect(shared.members[0]!.activeDaysThisWeek).toBeGreaterThanOrEqual(1);
+    const today = todayIn(lagos);
+    expect(shared.weekStart).toBe(addDays(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7)));
+    expect((await request(learning, 'GET', url, L(bayo))).body).toMatchObject({ sharing: false, members: [{ name: 'Ada Ige' }], notSharing: 1 });
+    expect((await request(learning, 'GET', url, L(owner))).body).toMatchObject({ members: [{ name: 'Ada Ige' }] });
+    expect((await request(learning, 'PUT', `${url}/sharing`, { ...L(owner), body: { share: true } })).status).toBe(403);
+    expect((await request(learning, 'PUT', `${url}/sharing`, { ...L(ada), body: { share: false } })).body).toMatchObject({ sharing: false, members: [], notSharing: 2 });
+
+    // Saying hello in the circle is one of the first steps.
+    const onTrack = `/v1/learning/me/programs/${adaProgram.enrollment.id}/on-track`;
+    expect((await request(learning, 'GET', onTrack, L(ada))).body).toMatchObject({ onboarding: { introducedInCircle: false } });
+    expect((await request(learning, 'POST', `/v1/learning/circles/${circleId}/posts`, { ...L(ada), body: { body: 'Hello everyone, I am Ada from Ilorin.', attachmentIds: [] } })).status).toBe(201);
+    expect((await request(learning, 'GET', onTrack, L(ada))).body).toMatchObject({ onboarding: { introducedInCircle: true } });
   });
 });
 

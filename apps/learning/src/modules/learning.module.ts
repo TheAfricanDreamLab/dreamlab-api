@@ -27,9 +27,10 @@ import { IAM_NAMES, PlayerService } from './player/player.service';
 import { ASSIGNED_CONTROLLERS, ASSIGNED_PROVIDERS } from './assigned';
 import { OUTCOMES_CONTROLLERS, OUTCOMES_PROVIDERS } from './outcomes';
 import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
+import { ENGAGEMENT_CONTROLLERS, ENGAGEMENT_PROVIDERS } from './engagement';
 
 @Module({
-  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController, CircleSpaceController, ...OUTCOMES_CONTROLLERS, ...SCORES_CONTROLLERS, ...ASSIGNED_CONTROLLERS],
+  controllers: [EnrollmentsController, PlayerController, LearningAdminController, CohortsController, ProgramsController, GradingController, FilesController, LiveController, MeetingWebhookController, CommunityController, CircleSpaceController, ...OUTCOMES_CONTROLLERS, ...SCORES_CONTROLLERS, ...ASSIGNED_CONTROLLERS, ...ENGAGEMENT_CONTROLLERS],
   providers: [
     EnrollmentsService,
     CohortsService,
@@ -51,6 +52,7 @@ import { SCORES_CONTROLLERS, SCORES_PROVIDERS } from './scores';
     ...OUTCOMES_PROVIDERS,
     ...SCORES_PROVIDERS,
     ...ASSIGNED_PROVIDERS,
+    ...ENGAGEMENT_PROVIDERS,
   ],
 })
 export class LearningModule {}

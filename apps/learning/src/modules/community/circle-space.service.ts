@@ -60,7 +60,7 @@ const KINDS: [RegExp, CircleAttachmentKind][] = [
   ],
 ];
 
-interface Access {
+export interface Access {
   circle: CircleRow;
   cohortName: string;
   timeZone: string;
@@ -88,7 +88,7 @@ export class CircleSpaceService {
 
   // ---------- access ----------
 
-  private async access(p: Principal, circleId: string): Promise<Access> {
+  async access(p: Principal, circleId: string): Promise<Access> {
     const [circle] = await this.db.sys.select().from(dreamCircles).where(eq(dreamCircles.id, circleId));
     if (!circle) throw notFound('circle_not_found', 'Circle not found');
     const [cohort] = await this.db.sys.select().from(cohorts).where(eq(cohorts.id, circle.cohortId));

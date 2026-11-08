@@ -1,4 +1,5 @@
-import type { ProgramAuthoring } from '@dreamlab/contracts';
+import type { ProgramAuthoringSchema } from '@dreamlab/contracts';
+import type { z } from 'zod';
 
 /*
  * The African Dream Lab: 15 weeks, 100 credits.
@@ -9,7 +10,7 @@ import type { ProgramAuthoring } from '@dreamlab/contracts';
  *   Final Assessment         week 15      reviews, Final Demonstration, Dream Score, graduation
  */
 
-export const dreamLabProgramme: ProgramAuthoring = {
+export const dreamLabProgramme: z.input<typeof ProgramAuthoringSchema> = {
   slug: 'the-african-dream-lab',
   title: 'The African Dream Lab',
   subtitle: 'Fifteen weeks to build the mind, the skills and the first real version of your dream.',

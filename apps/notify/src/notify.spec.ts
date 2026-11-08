@@ -32,6 +32,7 @@ describe('email preferences', () => {
     const prefs = withDefaults({ grades: false, spam: false });
     expect(prefs.grades).toBe(false);
     expect(prefs.sessions).toBe(true);
+    expect(prefs.progress).toBe(true);
     expect(Object.keys(prefs)).not.toContain('spam');
   });
 });
@@ -54,6 +55,18 @@ describe('notification email', () => {
     const plain = notificationEmail('t@example.com', 'Tunde', { title: 'Hello', body: 'No link', link: null }, 'https://learn.test');
     expect(plain.html).not.toContain('href="https://learn.test/app/grading');
     expect(plain.text).toContain('Hi Tunde,');
+  });
+
+  it('sends reminders back to the lesson, without changing other emails that link there', () => {
+    const reminder = notificationEmail('a@example.com', 'Amara Okafor', { category: 'progress', title: 'Your next lesson is waiting', body: 'Twenty minutes today keeps you on track.', link: '/learn/e1/i2' }, 'https://learn.test');
+    expect(reminder.html).toContain('Staying on track');
+    expect(reminder.html).toContain('>Pick up where you left off</a>');
+    expect(reminder.text).toContain('Hi Amara,');
+    expect(reminder.text).toContain('https://learn.test/app/account#notifications');
+    const programme = notificationEmail('a@example.com', 'Amara', { category: 'progress', title: 'A note from your facilitator', body: 'How is it going?', link: '/app/programme' }, 'https://learn.test');
+    expect(programme.html).toContain('>Open My programme</a>');
+    const grade = notificationEmail('a@example.com', 'Amara', { category: 'grades', title: 'Graded', body: '80%', link: '/learn/e1/i2' }, 'https://learn.test');
+    expect(grade.html).toContain('>See your result</a>');
   });
 });
 
