@@ -30,7 +30,7 @@ export const IAM_NAMES = Symbol('IAM_NAMES');
 /** Newest discussion posts shown at once (each with its replies). */
 const DISCUSSION_POSTS = 100;
 
-const { courseEnrollments, itemProgress, submissions, grades } = schema;
+const { courseEnrollments, itemProgress, submissions, grades, progressReminders } = schema;
 type ProgressRow = typeof itemProgress.$inferSelect;
 type Located = { enrollment: EnrollmentRow; content: CourseContent; item: ContentItemRef & { module: CourseContent['modules'][number] } };
 
@@ -57,6 +57,17 @@ export class PlayerService {
     const { enrollment, content, item } = await this.locate(p, enrollmentId, itemId);
     const progress = await this.db.tenant(learnerCtx(p), async (tx) => {
       await tx.update(courseEnrollments).set({ lastActiveAt: new Date() }).where(eq(courseEnrollments.id, enrollment.id));
+      // Back after a reminder or a check-in (LRN-9): it counts as answered.
+      await tx
+        .update(progressReminders)
+        .set({ returnedAt: new Date() })
+        .where(
+          and(
+            eq(progressReminders.userId, p.userId),
+            inArray(progressReminders.enrollmentId, enrollment.programEnrollmentId ? [enrollment.id, enrollment.programEnrollmentId] : [enrollment.id]),
+            isNull(progressReminders.returnedAt),
+          ),
+        );
       return this.ensureProgress(tx, p, enrollment, item);
     });
     const { mine, graded } = await this.db.tenant(learnerCtx(p), async (tx) => {

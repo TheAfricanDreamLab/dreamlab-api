@@ -24,4 +24,5 @@ export * from '../modules/outcomes/entities/graduation.entity';
 export * from '../modules/outcomes/entities/credential.entity';
 export * from '../modules/scores/entities/dream-score.entity';
 export * from '../modules/assigned/entities/learning-assignment.entity';
+export * from '../modules/engagement/entities/engagement.entity';
 export { inbox, outbox } from '@lib/messaging';

@@ -13,6 +13,8 @@ export const calendarWeeks = pgTable(
     phaseName: text('phase_name').notNull(),
     focus: text('focus').notNull(),
     majorOutput: text('major_output').notNull(),
+    /** A catch-up week has no new lessons: time to get level (LRN-9). */
+    kind: text('kind', { enum: ['learning', 'catch_up'] }).notNull().default('learning'),
     startsOn: date('starts_on').notNull(),
     endsOn: date('ends_on').notNull(),
     ...timestamps,
